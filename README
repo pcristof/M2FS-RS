@@ -1,0 +1,6 @@
+m2fs_zero.py
+m2fs_dark.py
+m2fs_reduce.py
+m2fs_apertures.py
+
+Run the above in that sequence.  All of them refer to m2fs_process.py
