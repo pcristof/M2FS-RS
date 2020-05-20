@@ -16,8 +16,7 @@ from astropy.nddata import StdDevUncertainty
 matplotlib.use('TkAgg')
 
 directory='/nfs/nas-0-9/mgwalker.proj/m2fs/'
-m2fsrun='may17'
-
+m2fsrun='jan20' 
 datadir=m2fs.get_datadir(m2fsrun)
 
 utdate=[]
@@ -70,6 +69,7 @@ for i in range(0,len(utdate)):
             for chip in (['c1','c2','c3','c4']):
 
                 master_bias=astropy.nddata.CCDData.read(directory+m2fsrun+'_'+ccd+'_'+chip+'_master_bias.fits')
+                obs_readnoise=np.float(master_bias.header['obs_rdnoise'])
                 master_dark=astropy.nddata.CCDData.read(directory+ccd+'_'+chip+'_master_dark.fits')
                 filename=datadir+utdate[i]+'/'+ccd+str(j).zfill(4)+chip+'.fits'
 
@@ -83,13 +83,13 @@ for i in range(0,len(utdate)):
                 debiased0=ccdproc.subtract_bias(trimmed2,master_bias)
                 dedark0=ccdproc.subtract_dark(debiased0,master_dark,exposure_time='exptime',exposure_unit=u.second,scale=True,add_keyword={'dark_corr':'Done'})
 
-                data_with_deviation=ccdproc.create_deviation(dedark0,gain=data.meta['egain']*u.electron/u.adu,readnoise=data.meta['enoise']*u.electron)
+                data_with_deviation=ccdproc.create_deviation(dedark0,gain=data.meta['egain']*u.electron/u.adu,readnoise=obs_readnoise*u.electron)
                 gain_corrected=ccdproc.gain_correct(data_with_deviation,data_with_deviation.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
 #                cr_cleaned=ccdproc.cosmicray_lacosmic(gain_corrected,sigclip=10)
 
                 bad=np.where(gain_corrected.data<0.)
 #                bad=np.where(gain_corrected._uncertainty.quantity.value!=gain_corrected._uncertainty.quantity.value)#bad variances due to negative counts after overscan/bias/dark correction
-                gain_corrected.uncertainty.quantity.value[bad]=np.float(data.header['enoise'])
+                gain_corrected.uncertainty.quantity.value[bad]=obs_readnoise
 
                 if chip=='c1':
                     c1_reduce=gain_corrected
