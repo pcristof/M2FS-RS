@@ -99,5 +99,5 @@ for ccd in (['b','r']):
 #        ccdall=c.average_combine(uncertainty_func=mycode.stdmean)
         ccdall=c.average_combine()
         ccdall[0].header['obs_rdnoise']=str(np.median(obs_readnoise))
+        ccdall[0].header['egain']=str(gain)
         ccdall.write(directory+m2fsrun+'_'+ccd+'_'+chip+'_master_bias.fits',overwrite=True)
-
