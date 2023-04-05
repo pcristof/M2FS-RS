@@ -326,9 +326,9 @@ class ReduceM2FS:
         self.fits_stack = {}
         for ccd in ['r', 'b']:
             for file_id in self.sci_list:
-                self.fits_files[(ccd, file_id)] = self.outpath \
+                self.fits_files[(self.utdate, ccd, file_id)] = self.outpath \
                     + "{}-{}{:04d}-results.fits".format(self.utdate, ccd, file_id)
-            self.fits_stack[(ccd, file_id)] = self.outpath \
+            self.fits_stack[(self.utdate, ccd)] = self.outpath \
                     + "{}-{}-results.fits".format(self.utdate, ccd)
 
 
@@ -386,7 +386,8 @@ class ReduceM2FS:
 
         objtype=np.array(objtype)[::-1]
         objcol = fits.Column(name='OBJTYPE',format='A6',array=objtype)
-        cols=fits.ColDefs([fits.Column(name='OBJTYPE',format='A6',array=objtype)])
+        apcol = fits.Column(name='APERTURE',format='I',array=np.arange(nbfibers)+1)
+        cols=fits.ColDefs([objcol, apcol])
         plugmap_table_hdu=fits.FITS_rec.from_columns(cols)
 
         pickle.dump(plugmap_table_hdu, open(self.plugmap_file,'wb'))
@@ -1509,6 +1510,12 @@ class ReduceM2FS:
         stack_array=pickle.load(open(stack_array_file,'rb'))
         stack_wavcal_array=pickle.load(open(stack_wavcal_array_file,'rb'))
 
+        ## PIC I add this cause apparently we need it for the get_hdul function
+        aperture_array_file = self.aperture_array_file
+        aperture_array = pickle.load(open(aperture_array_file,'rb'))
+        linelist_file = self.linelist_file
+        linelist = fdump.get_linelist(linelist_file)
+
         temperature=[]
         # for j in range(0,len(scifile0[i])):
         for file_id in self.sci_list:
@@ -1537,7 +1544,10 @@ class ReduceM2FS:
             plugmap0=pickle.load(open(plugmap_file,'rb'))
             m2fsrun = 'dummy'
             field_name = "dummy"
-            new_hdul=m2fs.get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap0,m2fsrun,field_name,thar,[temperature[len(temperature)-1]])
+            new_hdul=m2fs.get_hdul(data,skysubtract_array,sky_array,wavcal_array,
+                                  plugmap0,m2fsrun,field_name,thar,
+                                  [temperature[len(temperature)-1]],
+                                  aperture_array, linelist)
             new_hdul[0].header['filtername']=filtername
             new_hdul[0].header['m2fsrun']=m2fsrun
             new_hdul[0].header['field_name']=field_name
@@ -1553,11 +1563,12 @@ class ReduceM2FS:
         temperature=np.array(temperature,dtype='str')
 
         new_hdul=m2fs.get_hdul(data,stack_array,sky_array,stack_wavcal_array,
-                               plugmap0,m2fsrun,field_name,thar,temperature)
+                               plugmap0,m2fsrun,field_name,thar,temperature,
+                               aperture_array, linelist)
 #                hjdstring=str(round(new_hdul[5].data['hjd'][0],2))
         # stack_fits_file=root2+'_'+new_hdul[0].header['ut-date']+'_'+new_hdul[0].header['ut-time']+'_stackskysub.fits'
         # stack_fits_file2=root2+'_'+new_hdul[0].header['ut-date']+'_'+new_hdul[0].header['ut-time']+'_stackskysub_file'
-        stack_fits_file = self.files_stack[(self.utdate, self.ccd)]
+        stack_fits_file = self.fits_stack[(self.utdate, self.ccd)]
         # g0=open(stack_fits_file2,'w')
         # g0.write(stack_fits_file+' '+obj[i]+' \n')
         # g0.close()
@@ -1572,14 +1583,15 @@ class ReduceM2FS:
             new_hdul[0].header['field_name']='dummy'
             if len(stack_array)>0:
                 new_hdul[0].header['weighted_mjd']=str(stack_wavcal_array[0].mjd)
-            new_hdul[0].header['continuum_lamp_frame']=self.filedict[(self.ccd, self.led_ref)]
+            ref_frame = self.arc_list[0]
+            new_hdul[0].header['continuum_lamp_frame']=str(ref_frame)
             tharframe0=self.arc_list
             for q in range(0,len(tharframe0)):
                 keyword='comparison_arc_frame_'+str(q)
                 new_hdul[0].header[keyword]=tharframe0[q]
 #                    new_hdul[0].header['comparison_arc_frame']=tharfile[i]
             # sciframe0=scifile[i].split('-')
-            sciframe0 = self.sci_list
+            sciframe0 = [str(self.sci_list[i]) for i in range(len(self.sci_list))]
 
             keyword='sub_frames'
             s=','

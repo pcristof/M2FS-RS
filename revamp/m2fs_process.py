@@ -2644,13 +2644,15 @@ def get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap,m2fsrun,field
         thar_wav_max_array.append(thar_wav_max)
 
         if plugmap['objtype'][i]=='TARGET':
-            coords=coord.SkyCoord(plugmap['ra'][i],plugmap['dec'][i],unit=(u.deg,u.deg),frame='icrs')
-            lco=coord.EarthLocation.from_geodetic(lon=-70.6919444*u.degree,lat=-29.0158333*u.degree,height=2380.*u.meter)
-            times=time.Time(wavcal_array[0].mjd,format='mjd',location=lco)
-            light_travel_time_helio=times.light_travel_time(coords,'heliocentric')
+            # coords=coord.SkyCoord(plugmap['ra'][i],plugmap['dec'][i],unit=(u.deg,u.deg),frame='icrs')
+            # lco=coord.EarthLocation.from_geodetic(lon=-70.6919444*u.degree,lat=-29.0158333*u.degree,height=2380.*u.meter)
+            # times=time.Time(wavcal_array[0].mjd,format='mjd',location=lco)
+            # light_travel_time_helio=times.light_travel_time(coords,'heliocentric')
             mjd_array.append(wavcal_array[0].mjd)
-            hjd_array.append((Time(wavcal_array[0].mjd,format='mjd').jd+light_travel_time_helio).value)
-            vheliocorr_array.append((coords.radial_velocity_correction('heliocentric',obstime=times).to(u.km/u.s)).value)
+            # hjd_array.append((Time(wavcal_array[0].mjd,format='mjd').jd+light_travel_time_helio).value)
+            hjd_array.append(wavcal_array[0].mjd+2400000.)
+            # vheliocorr_array.append((coords.radial_velocity_correction('heliocentric',obstime=times).to(u.km/u.s)).value)
+            vheliocorr_array.append(0.)
         else:
             mjd_array.append(wavcal_array[0].mjd)
             hjd_array.append(wavcal_array[0].mjd+2400000.)
@@ -2671,7 +2673,38 @@ def get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap,m2fsrun,field
     temperature_array=np.array(temperature_array,dtype=np.object_)
     row_array=np.array(row_array)
 
-    cols=fits.ColDefs([fits.Column(name='EXPID',format='A100',array=plugmap['expid']),fits.Column(name='OBJTYPE',format='A6',array=plugmap['objtype']),fits.Column(name='RA',format='D',array=plugmap['ra']),fits.Column(name='DEC',format='D',array=plugmap['dec']),fits.Column(name='APERTURE',format='I',array=plugmap['aperture']),fits.Column(name='RMAG',format='D',array=plugmap['rmag']),fits.Column(name='RAPMAG',format='D',array=plugmap['rapmag']),fits.Column(name='ICODE',format='D',array=plugmap['icode']),fits.Column(name='RCODE',format='D',array=plugmap['rcode']),fits.Column(name='BCODE',format='A6',array=plugmap['bcode']),fits.Column(name='MAG',format='5D',array=plugmap['mag']),fits.Column(name='XFOCAL',format='D',array=plugmap['xfocal']),fits.Column(name='YFOCAL',format='D',array=plugmap['yfocal']),fits.Column(name='FRAMES',format='B',array=plugmap['frames']),fits.Column(name='CHANNEL',format='A100',array=plugmap['channel']),fits.Column(name='RESOLUTION',format='A100',array=plugmap['resolution']),fits.Column(name='FILTER',format='A100',array=plugmap['filter']),fits.Column(name='CHANNEL_CASSETTE_FIBER',format='A100',array=plugmap['channel_cassette_fiber']),fits.Column(name='MJD',format='D',array=mjd_array),fits.Column(name='HJD',format='D',array=hjd_array),fits.Column(name='vheliocorr',format='d',array=vheliocorr_array),fits.Column(name='SNRATIO',format='d',array=snratio_array),fits.Column(name='run_id',format='A100',array=m2fsrun_array),fits.Column(name='field_name',format='A100',array=field_name_array),fits.Column(name='wav_npoints',format='PI()',array=thar_npoints_array),fits.Column(name='wav_rms',format='PD()',array=thar_rms_array),fits.Column(name='wav_resolution',format='PD()',array=thar_resolution_array),fits.Column(name='wav_min',format='PD()',array=thar_wav_min_array),fits.Column(name='wav_max',format='PD()',array=thar_wav_max_array),fits.Column(name='row',format='D',array=row_array),fits.Column(name='temperature',format='PD()',array=temperature_array)])
+    cols=fits.ColDefs([
+                    #    fits.Column(name='EXPID',format='A100',array=plugmap['expid']),
+                       fits.Column(name='OBJTYPE',format='A6',array=plugmap['objtype']),
+                    #    fits.Column(name='RA',format='D',array=plugmap['ra']),
+                    #    fits.Column(name='DEC',format='D',array=plugmap['dec']),
+                       fits.Column(name='APERTURE',format='I',array=plugmap['aperture']),
+                    #    fits.Column(name='RMAG',format='D',array=plugmap['rmag']),
+                    #    fits.Column(name='RAPMAG',format='D',array=plugmap['rapmag']),
+                    #    fits.Column(name='ICODE',format='D',array=plugmap['icode']),
+                    #    fits.Column(name='RCODE',format='D',array=plugmap['rcode']),
+                    #    fits.Column(name='BCODE',format='A6',array=plugmap['bcode']),
+                    #    fits.Column(name='MAG',format='5D',array=plugmap['mag']),
+                    #    fits.Column(name='XFOCAL',format='D',array=plugmap['xfocal']),
+                    #    fits.Column(name='YFOCAL',format='D',array=plugmap['yfocal']),
+                    #    fits.Column(name='FRAMES',format='B',array=plugmap['frames']),
+                    #    fits.Column(name='CHANNEL',format='A100',array=plugmap['channel']),
+                    #    fits.Column(name='RESOLUTION',format='A100',array=plugmap['resolution']),
+                    #    fits.Column(name='FILTER',format='A100',array=plugmap['filter']),
+                    #    fits.Column(name='CHANNEL_CASSETTE_FIBER',format='A100',array=plugmap['channel_cassette_fiber']),
+                       fits.Column(name='MJD',format='D',array=mjd_array),
+                       fits.Column(name='HJD',format='D',array=hjd_array),
+                       fits.Column(name='vheliocorr',format='d',array=vheliocorr_array),
+                       fits.Column(name='SNRATIO',format='d',array=snratio_array),
+                       fits.Column(name='run_id',format='A100',array=m2fsrun_array),
+                       fits.Column(name='field_name',format='A100',array=field_name_array),
+                       fits.Column(name='wav_npoints',format='PI()',array=thar_npoints_array),
+                       fits.Column(name='wav_rms',format='PD()',array=thar_rms_array),
+                       fits.Column(name='wav_resolution',format='PD()',array=thar_resolution_array),
+                       fits.Column(name='wav_min',format='PD()',array=thar_wav_min_array),
+                       fits.Column(name='wav_max',format='PD()',array=thar_wav_max_array),
+                       fits.Column(name='row',format='D',array=row_array),
+                       fits.Column(name='temperature',format='PD()',array=temperature_array)])
     table_hdu=fits.FITS_rec.from_columns(cols)
 
     if len(skysubtract_array)>0:
