@@ -1,0 +1,1619 @@
+import astropy
+import astropy.units as u ## This really is a bad habit...
+from astropy.nddata import NDData
+from astropy.nddata import CCDData
+from astropy.modeling import models
+import numpy as np
+import ccdproc
+from ccdproc import Combiner
+import warnings
+from astropy import log
+from copy import deepcopy ## ?
+from astropy.nddata import StdDevUncertainty
+
+import matplotlib.pyplot as plt
+
+
+def zero_corr(filedict, color, ccd, bias_list, outfile):
+    '''This function performs the initial correction of the data and writes the new data
+    to fits files. It is a revamped version of the m2fs_zero_jan20.py script.
+    There are still a lot of hardcoded stuff that should really not be.'''
+
+    obs_readnoise=[]
+    master_processed=[]
+    sig_master_processed=[]
+    processed=[]
+    sig_processed=[]
+    ntot = len(bias_list)
+    log.setLevel('WARNING') ## Only display warnings of errors
+    for i, bias_id in enumerate(bias_list):
+        filename = filedict[(color, ccd, bias_id)]
+        ## Load the data contained in the fits file
+        data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
+        # print(filename,data.header['object'],data.header['binning'])
+
+        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
+        trimmed1=ccdproc.trim_image(oscan_subtracted[:,:1024],add_keyword={'trim1':'Done'})
+        trimmed2=ccdproc.trim_image(trimmed1[:1028,:1024],add_keyword={'trim2':'Done'})
+        array1d=trimmed2.data.flatten()
+        gain=np.float(trimmed2.header['egain'])
+        keep=np.where(np.abs(array1d)<100.)[0] #remove crazy outliers
+        obs_readnoise.append(np.std(array1d[keep]*gain))
+#                data_with_deviation=ccdproc.create_deviation(trimmed2,gain=data.meta['egain']*u.electron/u.adu,readnoise=data.meta['enoise']*u.electron)
+#                gain_corrected=ccdproc.gain_correct(data_with_deviation,data_with_deviation.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
+#                cr_cleaned=ccdproc.cosmicray_lacosmic(trimmed2,sigclip=5,gain_apply=False,gain=0.68,readnoise=2.7)
+#                sig_cr_cleaned=cr_cleaned.uncertainty._array
+
+#                data_with_deviation=ccdproc.create_deviation(data,gain=data.meta['egain']*u.electron/u.adu,readnoise=data.meta['enoise']*u.electron)
+#                gain_corrected=ccdproc.gain_correct(data_with_deviation,data_with_deviation.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
+#                cr_cleaned=ccdproc.cosmicray_lacosmic(gain_corrected,sigclip=5)
+#                oscan_subtracted=ccdproc.subtract_overscan(cr_cleaned,overscan=cr_cleaned[:,1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
+#                trimmed1=ccdproc.trim_image(oscan_subtracted[:,:1024],add_keyword={'trim1':'Done'})
+#                trimmed2=ccdproc.trim_image(trimmed1[:1028,:1024],add_keyword={'trim2':'Done'})
+#                trimmed.append(trimmed2)
+#                sig_trimmed.append(trimmed2.uncertainty._array)
+        processed.append(trimmed2)
+#                sig_processed.append(sig_cr_cleaned)
+        master_processed.append(trimmed2)
+#                sig_master_processed.append(sig_cr_cleaned)
+#            processed=np.array(processed)
+#            sig_processed=np.array(sig_processed)
+
+#            c=Combiner(processed)
+#            c.clip_extrema(nlow=1,nhigh=1)
+#            old_n_masked=0
+#            new_n_masked=c.data_arr.mask.sum()
+#            while (new_n_masked > old_n_masked):
+#                c.sigma_clipping(low_thresh=3,high_thresh=3,func=np.ma.median)
+#                old_n_masked=new_n_masked
+#                new_n_masked=c.data_arr.mask.sum()
+#            ccdall=c.average_combine()
+#            ccdall.write(directory+m2fsrun+'_'+ccd+'_'+chip+'_master_bias'+str(i+1)+'.fits',overwrite=True)
+        print("Preprocessing bias frames ... {:0.2f}%".format(i/ntot*100), end='\r')
+    print("Preprocessing bias frames ... {:0.2f}%".format(i/ntot*100))
+
+    obs_readnoise=np.array(obs_readnoise)
+    c=Combiner(master_processed)
+    c.clip_extrema(nlow=1,nhigh=1)
+    old_n_masked=0
+    new_n_masked=c.data_arr.mask.sum()
+    print("Sigma clipping ...")
+    while (new_n_masked > old_n_masked):
+#            c.sigma_clipping(func=np.ma.median)
+        c.sigma_clipping(low_thresh=3,high_thresh=3,func=np.ma.median)
+        old_n_masked=new_n_masked
+        new_n_masked=c.data_arr.mask.sum()
+#        c.clip_extrema(nlow=5,nhigh=5)
+#        c.weights=1./sig_master_bias**2
+#        ccdall=c.average_combine(uncertainty_func=mycode.stdmean)
+    print("zero_corr: Saving to {}".format(outfile.split('/')[-1]))
+    ccdall=c.average_combine()
+    ccdall[0].header['obs_rdnoise']=str(np.median(obs_readnoise))
+    ccdall[0].header['egain']=str(gain)
+    ccdall.write(outfile, overwrite=True)
+
+def dark_corr(filedict, color, ccd, dark_list, masterbiasfile, outfile):
+    '''This function performs the initial correction of the data and writes the new data
+    to fits files. It is a revamped version of the m2fs_zero_jan20.py script.
+    There are still a lot of hardcoded stuff that should really not be.'''
+
+    master_bias=astropy.nddata.CCDData.read(masterbiasfile)
+
+    exptime=[]
+    master_debiased=[]
+    master_exptime=[]
+    ntot = len(dark_list)
+    log.setLevel('WARNING') ## Only display warnings of errors
+    for i, dark_id in enumerate(dark_list):        
+        filename = filedict[(color, ccd, dark_id)]
+        data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
+        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
+        trimmed1=ccdproc.trim_image(oscan_subtracted[:,:1024],add_keyword={'trim1':'Done'})
+        trimmed2=ccdproc.trim_image(trimmed1[:1028,:1024],add_keyword={'trim2':'Done'})
+        exptime.append(data.header['exptime'])
+        master_exptime.append(data.header['exptime'])
+
+        debiased0=ccdproc.subtract_bias(trimmed2, master_bias)
+        master_debiased.append(debiased0)
+        print("Preprocessing dark frames ... {:0.2f}%".format(i/ntot*100), end='\r')
+    print("Preprocessing dark frames ... {:0.2f}%".format(i/ntot*100))
+
+    master_exptime=np.array(master_exptime)
+    if np.std(master_exptime)>0.:
+        print('WARNING: subexposures for darks have different exposure times!!!!')
+        print(master_exptime)
+        raise Exception('WARNING: subexposures for darks have different exposure times!!!!')
+    
+    c=Combiner(master_debiased)
+    c.clip_extrema(nlow=1,nhigh=1)
+    old_n_masked=0
+    new_n_masked=c.data_arr.mask.sum()
+    while (new_n_masked > old_n_masked):
+        c.sigma_clipping(low_thresh=3,high_thresh=3,func=np.ma.median)
+        old_n_masked=new_n_masked
+        new_n_masked=c.data_arr.mask.sum()
+
+    print("dark_corr: Saving to {}".format(outfile.split('/')[-1]))
+    ccdall=c.average_combine()
+    ccdall.header['exptime']=np.mean(master_exptime)
+    ccdall.write(outfile, overwrite=True)
+
+def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes, filedict):
+    # for filename in framelist:
+    # for file_id in all_list:
+    for tile in np.arange(1, 5):
+        filename = rawfiledict[(ccd, tile, file_id)]
+        masterbiasfile = masterbiasframes[(ccd, tile)]
+        masterdarkfile = masterdarkframes[(ccd, tile)]
+        outfile = filedict[(ccd, file_id)]
+
+        master_bias=astropy.nddata.CCDData.read(masterbiasfile)
+        obs_readnoise=np.float(master_bias.header['obs_rdnoise'])
+        master_dark=astropy.nddata.CCDData.read(masterdarkfile)
+
+        data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
+        gain=np.float(data.header['egain'])
+
+        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
+        trimmed1=ccdproc.trim_image(oscan_subtracted[:,:1024],add_keyword={'trim1':'Done'})
+        trimmed2=ccdproc.trim_image(trimmed1[:1028,:1024],add_keyword={'trim2':'Done'})
+
+        debiased0=ccdproc.subtract_bias(trimmed2,master_bias)
+        dedark0=ccdproc.subtract_dark(debiased0,master_dark,exposure_time='exptime',exposure_unit=u.second,scale=True,add_keyword={'dark_corr':'Done'})
+
+        data_with_deviation=ccdproc.create_deviation(dedark0,gain=data.meta['egain']*u.electron/u.adu,readnoise=obs_readnoise*u.electron)
+
+        gain_corrected=ccdproc.gain_correct(data_with_deviation,data_with_deviation.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
+#                master_dark_gain_corrected=ccdproc.gain_correct(master_dark,master_dark.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
+#                master_bias_gain_corrected=ccdproc.gain_correct(master_bias,master_bias.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
+
+        gain_corrected2=deepcopy(gain_corrected)
+        exptime_ratio=np.float(data.header['exptime'])/np.float(master_dark.meta['exptime'])
+
+        ntot = len(gain_corrected2.data)
+        for k in range(0,len(gain_corrected2.data)):
+            for q in range(0,len(gain_corrected2.data[k])):
+                gain_corrected2.uncertainty.quantity.value[k][q]=(np.max(np.array([gain_corrected2.data[k][q]+master_dark.data[k][q]*gain*exptime_ratio+2.+obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2,0.6*(obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+#                        poop1=(np.max(np.array([gain_corrected2.data[k][q]+master_dark.data[k][q]*gain*exptime_ratio+2.+obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2,0.6*(obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+#                        poop2=(np.max(np.array([gain_corrected2.data[k][q]+2.+obs_readnoise**2,0.6*(obs_readnoise**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+#                        print(poop1/poop2)
+#                cr_cleaned=ccdproc.cosmicray_lacosmic(gain_corrected,sigclip=10)
+            print("Uncertainty computation {:0.0f}%".format(k/ntot*100), end='\r')
+        print("Uncertainty computation {:0.0f}%".format(k/ntot*100))
+#                bad=np.where(gain_corrected.data<0.)
+#                bad=np.where(gain_corrected._uncertainty.quantity.value!=gain_corrected._uncertainty.quantity.value)#bad variances due to negative counts after overscan/bias/dark correction
+#                gain_corrected.uncertainty.quantity.value[bad]=obs_readnoise
+        if 'c1' in filename:
+            c1_reduce=gain_corrected2
+        if 'c2' in filename:
+            c2_reduce=gain_corrected2
+        if 'c3' in filename:
+            c3_reduce=gain_corrected2
+        if 'c4' in filename:
+            c4_reduce=gain_corrected2
+
+    left_data=np.concatenate((c1_reduce,np.flipud(c4_reduce)),axis=0)#left half of stitched image
+    left_uncertainty=np.concatenate((c1_reduce.uncertainty._array,np.flipud(c4_reduce.uncertainty._array)),axis=0)
+    left_mask=np.concatenate((c1_reduce.mask,np.flipud(c4_reduce.mask)),axis=0)
+    right_data=np.concatenate((np.fliplr(c2_reduce),np.fliplr(np.flipud(c3_reduce))),axis=0)#right half of stitched image
+    right_uncertainty=np.concatenate((np.fliplr(c2_reduce.uncertainty._array),np.fliplr(np.flipud(c3_reduce.uncertainty._array))),axis=0)
+    right_mask=np.concatenate((np.fliplr(c2_reduce.mask),np.fliplr(np.flipud(c3_reduce.mask))),axis=0)
+
+    stitched_data=np.concatenate((left_data,right_data),axis=1)
+    stitched_uncertainty=np.concatenate((left_uncertainty,right_uncertainty),axis=1)
+    stitched_mask=np.concatenate((left_mask,right_mask),axis=1)
+
+    stitched=astropy.nddata.CCDData(stitched_data,unit=u.electron,uncertainty=StdDevUncertainty(stitched_uncertainty),mask=stitched_mask)
+
+#            bad=np.where(stitched_uncertainty!=stitched_uncertainty)#bad variances due to negative counts after overscan/bias/dark correction
+#            stitched_mask[bad]=True
+#            stitched_uncertainty[bad]=1.e+10
+#            stitched.uncertainty=stitched_uncertainty
+#            stitched.mask=stitched_mask
+#            stitched.mask[bad]=True
+    stitched.header=c1_reduce.header
+    stitched.write(outfile, overwrite=True)
+    print("stitch_frames: Done")
+
+def stitch_frames_bad(framelist, masterbiasfile, masterdarkfile, outfile):
+    for filename in framelist:
+        master_bias=astropy.nddata.CCDData.read(masterbiasfile)
+        obs_readnoise=np.float(master_bias.header['obs_rdnoise'])
+        master_dark=astropy.nddata.CCDData.read(masterdarkfile)
+
+        data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
+        gain=np.float(data.header['egain'])
+
+        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
+        trimmed1=ccdproc.trim_image(oscan_subtracted[:,:1024],add_keyword={'trim1':'Done'})
+        trimmed2=ccdproc.trim_image(trimmed1[:1028,:1024],add_keyword={'trim2':'Done'})
+
+        debiased0=ccdproc.subtract_bias(trimmed2,master_bias)
+        dedark0=ccdproc.subtract_dark(debiased0,master_dark,exposure_time='exptime',exposure_unit=u.second,scale=True,add_keyword={'dark_corr':'Done'})
+
+        data_with_deviation=ccdproc.create_deviation(dedark0,gain=data.meta['egain']*u.electron/u.adu,readnoise=obs_readnoise*u.electron)
+
+        gain_corrected=ccdproc.gain_correct(data_with_deviation,data_with_deviation.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
+#                master_dark_gain_corrected=ccdproc.gain_correct(master_dark,master_dark.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
+#                master_bias_gain_corrected=ccdproc.gain_correct(master_bias,master_bias.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
+
+        gain_corrected2=deepcopy(gain_corrected)
+        exptime_ratio=np.float(data.header['exptime'])/np.float(master_dark.meta['exptime'])
+
+        ntot = len(gain_corrected2.data)
+        for k in range(0,len(gain_corrected2.data)):
+            for q in range(0,len(gain_corrected2.data[k])):
+                gain_corrected2.uncertainty.quantity.value[k][q]=(np.max(np.array([gain_corrected2.data[k][q]+master_dark.data[k][q]*gain*exptime_ratio+2.+obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2,0.6*(obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+#                        poop1=(np.max(np.array([gain_corrected2.data[k][q]+master_dark.data[k][q]*gain*exptime_ratio+2.+obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2,0.6*(obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+#                        poop2=(np.max(np.array([gain_corrected2.data[k][q]+2.+obs_readnoise**2,0.6*(obs_readnoise**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+#                        print(poop1/poop2)
+#                cr_cleaned=ccdproc.cosmicray_lacosmic(gain_corrected,sigclip=10)
+            print("Uncertainty computation {:0.0f}%".format(k/ntot*100), end='\r')
+        print("Uncertainty computation {:0.0f}%".format(k/ntot*100))
+#                bad=np.where(gain_corrected.data<0.)
+#                bad=np.where(gain_corrected._uncertainty.quantity.value!=gain_corrected._uncertainty.quantity.value)#bad variances due to negative counts after overscan/bias/dark correction
+#                gain_corrected.uncertainty.quantity.value[bad]=obs_readnoise
+
+        if 'c1' in filename:
+            c1_reduce=gain_corrected2
+        if 'c2' in filename:
+            c2_reduce=gain_corrected2
+        if 'c3' in filename:
+            c3_reduce=gain_corrected2
+        if 'c4' in filename:
+            c4_reduce=gain_corrected2
+
+    left_data=np.concatenate((c1_reduce,np.flipud(c4_reduce)),axis=0)#left half of stitched image
+    left_uncertainty=np.concatenate((c1_reduce.uncertainty._array,np.flipud(c4_reduce.uncertainty._array)),axis=0)
+    left_mask=np.concatenate((c1_reduce.mask,np.flipud(c4_reduce.mask)),axis=0)
+    right_data=np.concatenate((np.fliplr(c2_reduce),np.fliplr(np.flipud(c3_reduce))),axis=0)#right half of stitched image
+    right_uncertainty=np.concatenate((np.fliplr(c2_reduce.uncertainty._array),np.fliplr(np.flipud(c3_reduce.uncertainty._array))),axis=0)
+    right_mask=np.concatenate((np.fliplr(c2_reduce.mask),np.fliplr(np.flipud(c3_reduce.mask))),axis=0)
+
+    stitched_data=np.concatenate((left_data,right_data),axis=1)
+    stitched_uncertainty=np.concatenate((left_uncertainty,right_uncertainty),axis=1)
+    stitched_mask=np.concatenate((left_mask,right_mask),axis=1)
+
+    stitched=astropy.nddata.CCDData(stitched_data,unit=u.electron,uncertainty=StdDevUncertainty(stitched_uncertainty),mask=stitched_mask)
+
+#            bad=np.where(stitched_uncertainty!=stitched_uncertainty)#bad variances due to negative counts after overscan/bias/dark correction
+#            stitched_mask[bad]=True
+#            stitched_uncertainty[bad]=1.e+10
+#            stitched.uncertainty=stitched_uncertainty
+#            stitched.mask=stitched_mask
+#            stitched.mask[bad]=True
+    stitched.header=c1_reduce.header
+    stitched.write(outfile, overwrite=True)
+    print("stitch_frames: Done")
+
+def stdmean(a,axis=None,dtype=None,out=None,ddof=0,keepdims=np._NoValue):
+    std=np.ma.std(a)
+#    print(len(a))
+    return std/np.sqrt(len(a))
+
+## PIC: The following functions are re-written or adapted versions of those found in m2fs_process.
+
+# def get_thar(datadir,utdate,ccd,tharfile,hires_exptime,medres_exptime,field_name,use_flat):
+def get_thar(filedict, ccd, id_list, lco, use_flat, exptime, id_lines_array_files):
+    '''Here again, there seems to be something about filters.
+    Filters are here used to select what to use for the "exptime" and to detect twilight.
+    I am assuming that we are high resolution, and bypass the twilight for now.'''
+    import astropy
+    import dill as pickle
+    from astropy import time, coordinates as coord, units as u
+    from astropy.coordinates import SkyCoord, EarthLocation
+    import numpy as np
+
+    field_name = 'blabla'
+
+    thar=[]
+    lines=[]
+    temperature=[]
+    thar_exptime=[]
+    thar_mjd=[]
+    for file_id in id_list:
+        data_file = filedict[(ccd, file_id)]
+        if use_flat:
+            # id_lines_array_file = tmppath + "{}{:04d}-id-lines-array.pickle".format(ccd, file_id)
+            id_lines_array_file = id_lines_array_files[(ccd, file_id)]
+        else:
+            raise Exception("fdump.get_thar(): case not implemented. Set use_flat=True.")
+            # id_lines_array_file = tmppath + "{}{:04d}-id-lines-array-noflat.pickle".format(ccd, file_id)
+        id_lines_array=pickle.load(open(id_lines_array_file,'rb'))
+        data=astropy.nddata.CCDData.read(data_file)#format is such that data.data[:,0] has column-0 value in all rows
+        time0=[data.header['DATE-OBS']+'T'+data.header['UT-TIME'],data.header['DATE-OBS']+'T'+data.header['UT-END']]
+        times=time.Time(time0,location=lco,precision=6)
+        filtername=data.header['FILTER']
+        ## PIC: Bypassing the following
+#         if filtername=='Mgb_Rev2':
+#             filtername='Mgb_HiRes'
+#         if filtername=='Mgb_HiRes':
+#             if ((np.float(data.header['exptime'])>=hires_exptime)|('twilight' in field_name)):
+#                 thar_mjd.append(np.mean(times.mjd))
+#                 thar.append(id_lines_array)
+# #                lines.append([id_lines_array[q].wav[id_lines_array[q].wav.mask==False] for q in range(0,len(id_lines_array))])
+#                 temperature.append(data.header['T-DOME'])
+#                 thar_exptime.append(np.float(data.header['exptime']))
+#         if filtername=='Mgb_MedRes':
+#             if ((np.float(data.header['exptime'])>=medres_exptime)|('twilight' in field_name)):
+#                 thar_mjd.append(np.mean(times.mjd))
+#                 thar.append(id_lines_array)
+# #                lines.append([id_lines_array[q].wav.data[id_lines_array[q].wav.mask==False] for q in range(0,len(id_lines_array))])
+#                 temperature.append(data.header['T-DOME'])
+#                 thar_exptime.append(np.float(data.header['exptime']))
+        ## -- 
+        ## And simply writing:
+        ## For a twilight, bypass exptime threshold
+        if ((np.float(data.header['exptime'])>=exptime)|('twilight' in field_name)): 
+            thar_mjd.append(np.mean(times.mjd))
+            thar.append(id_lines_array)
+#                lines.append([id_lines_array[q].wav[id_lines_array[q].wav.mask==False] for q in range(0,len(id_lines_array))])
+            temperature.append(data.header['T-DOME'])
+            thar_exptime.append(np.float(data.header['exptime']))
+
+    temperature=np.array(temperature)
+    thar_exptime=np.array(thar_exptime)
+    thar_mjd=np.array(thar_mjd)
+
+    if len(thar)==0:
+        print('ERROR: no qualifying ThArNe exposures for this resolution!!!!!')
+    if np.std(thar_exptime)>0.:
+        if filtername=='Mgb_MedRes':
+            keep=np.where(thar_exptime==np.min(thar_exptime))[0]
+            thar0=[]
+            for qqq in keep:
+                thar0.append(thar[qqq])
+            thar=thar0
+            thar_mjd=thar_mjd[keep]
+            thar_exptime=thar_exptime[keep]
+
+    return(thar,lines,temperature,thar_exptime,thar_mjd)
+
+def get_linelist(linelist_file, species_name='default-name'):
+    import numpy as np
+    with open(linelist_file) as f:
+        data=f.readlines()
+    linelist_wavelength=[]
+    linelist_species=[]
+    for line in data:
+        p=line.split()
+        linelist_wavelength.append(float(p[0]))
+        if len(p)>1:
+            linelist_species.append(p[1])
+        else:
+            linelist_species.append(species_name)
+    linelist_wavelength=np.array(linelist_wavelength)
+    linelist_species=np.array(linelist_species)
+    return m2fs.linelist(wavelength=linelist_wavelength,species=linelist_species)
+
+import m2fs_process as m2fs
+
+def get_id_lines_template(extract1d,linelist,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order,threshold_factor,window,id_lines_order,id_lines_rejection_iterations,id_lines_rejection_sigma,id_lines_tol_angs,id_lines_template_fiddle,id_lines_template0,resolution_order,resolution_rejection_iterations):
+    import numpy as np
+    import astropy.units as u
+    from specutils.fitting import find_lines_threshold
+    from specutils.fitting import find_lines_derivative
+    from specutils.spectra import Spectrum1D
+    import matplotlib.pyplot as plt
+    from copy import deepcopy
+    from astropy.modeling import models,fitting
+
+    continuum0,spec_contsub,fit_lines=m2fs.get_fitlines(extract1d,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,threshold_factor,window,continuum_rejection_order)
+
+    line_centers=[fit_lines.fit[j].mean.value for j in range(0,len(fit_lines.fit))]
+    id_lines_pix=[]
+    id_lines_wav=[]
+    id_lines_species=[]
+    id_lines_used=[]
+    order=[id_lines_order]
+    rejection_iterations=[id_lines_rejection_iterations]
+    rejection_sigma=[id_lines_rejection_sigma]
+    func=[models.Legendre1D(degree=1)]
+    rms=[]
+    npoints=[]
+    if id_lines_template_fiddle:
+        id_lines_used=np.where(id_lines_template0.wav.mask==False)[0].tolist()
+        id_lines_pix=[id_lines_template0.fit_lines.fit[q].mean.value for q in id_lines_used]
+        id_lines_wav=id_lines_template0.wav[id_lines_used].tolist()
+        func=[id_lines_template0.func]
+        order=[id_lines_template0.func.degree]
+        rms=[id_lines_template0.rms]
+        npoints=[id_lines_template0.npoints]
+
+    fig=plt.figure(1)
+    ax1,ax2=m2fs.plot_id_lines(extract1d,continuum0,fit_lines,line_centers,id_lines_pix,id_lines_wav,id_lines_used,func[len(func)-1],fig)
+#
+    print('press \'m\' to ID line nearest cursor \n')
+    print('press \'d\' to delete ID for line nearest cursor \n')
+    print('press \'o\' to change order of polynomial \n')
+    print('press \'r\' to change rejection sigma factor \n')
+    print('press \'t\' to change number of rejection iterations \n')
+    print('press \'g\' to re-fit wavelength solution \n')
+    print('press \'l\' to add lines from linelist according to fit \n')
+    print('press \'q\' to quit \n')
+    print('press \'.\' to print cursor position and position of nearest line \n')
+
+    cid=fig.canvas.mpl_connect('key_press_event',lambda event: on_key_id_lines(event,[deepcopy(extract1d),continuum0,fit_lines,linelist,line_centers,id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints,id_lines_tol_angs,fig]))
+    plt.show()
+    plt.close()
+
+    wav=np.ma.masked_array(np.full((len(fit_lines.fit)),-999,dtype='float'),mask=np.full((len(fit_lines.fit)),True,dtype=bool))
+
+    for j in range(0,len(id_lines_pix)):
+        wav[id_lines_used[j]]=id_lines_wav[j]
+        wav.mask[id_lines_used[j]]==False
+
+    resolution,resolution_rms,resolution_npoints=m2fs.get_resolution(deepcopy(fit_lines),deepcopy(wav),resolution_order,resolution_rejection_iterations)
+
+    return m2fs.id_lines(aperture=extract1d.aperture,fit_lines=fit_lines,wav=wav,func=func[len(func)-1],rms=rms[len(rms)-1],npoints=npoints[len(npoints)-1],resolution=resolution,resolution_rms=resolution_rms,resolution_npoints=resolution_npoints)
+
+def on_key_id_lines(event,args_list):
+    import numpy as np
+    import m2fs_process as m2fs
+    from specutils import SpectralRegion
+    import astropy.units as u
+    from astropy.modeling import models
+    from specutils.spectra import Spectrum1D
+    from astropy.modeling import models,fitting
+    from copy import deepcopy
+
+    print('you pressed ',event.key)
+
+    global id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints
+    extract1d,continuum,fit_lines,linelist,line_centers,id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints,id_lines_tol_angs,fig=args_list
+
+    if event.key=='.':
+        x0=event.xdata
+        y0=event.ydata
+        print('cursor pixel = ',str(x0))
+        dist=(line_centers-x0)**2
+        best=np.where(dist==np.min(dist))[0][0]
+        print('nearest line pixel = ',str(line_centers[best]))
+        used=np.array(np.where(id_lines_pix==line_centers[best])[0])
+        if len(used)>0:
+            print('wavelength from line list =',str(np.array(id_lines_wav)[used][0]))
+        else:
+            print('line not yet identified')
+        print('function wavelength =',str(func[len(func)-1](line_centers[best])))
+
+    if event.key=='m':
+        x0=event.xdata
+        y0=event.ydata
+        print('cursor pixel = ',str(x0))
+        dist=(line_centers-x0)**2
+        best=np.where(dist==np.min(dist))[0][0]
+        print('nearest line pixel = ',str(line_centers[best]))
+        command=input('enter wavelength in Angstroms \n')
+        if command=='':
+            print('no information entered')
+        else:
+            id_lines_pix.append(line_centers[best])
+            id_lines_wav.append(np.float(command))
+            id_lines_used.append(best)
+
+    if event.key=='d':#delete nearest boundary point
+        print('delete point nearest (',event.xdata,event.ydata,')')
+        if len(id_lines_pix)>0:
+            dist=(id_lines_pix-event.xdata)**2
+            best=np.where(dist==np.min(dist))[0][0]
+            del id_lines_pix[best]
+            del id_lines_wav[best]
+            del id_lines_used[best]
+        else:
+            print('no ID\'d lines to delete!')
+
+    if event.key=='o':
+        print('order of polynomial fit is ',order[len(order)-1])
+        command=input('enter new order (must be integer): ')
+        if command=='':
+            print('keeping original value')
+        else:
+            order.append(np.long(command))
+        func0,rms0,npoints0,y=m2fs.id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
+        func.append(func0)
+        rms.append(rms0)
+        npoints.append(npoints0)
+
+    if event.key=='r':
+        print('rejection sigma is ',rejection_sigma[len(rejection_sigma)-1])
+        command=input('enter new rejection sigma (float): ')
+        if command=='':
+            print('keeping original value')
+        else:
+            rejection_sigma.append(np.float(command))
+        func0,rms0,npoints0,y=m2fs.id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
+        func.append(func0)
+        rms.append(rms0)
+        npoints.append(npoints0)
+
+    if event.key=='t':
+        print('number of rejection iterations is ',rejection_iterations[len(rejection_iterations)-1])
+        command=input('enter new rejection iterations = (integer): ')
+        if command=='':
+            print('keeping original value')
+        else:
+            rejection_iterations.append(np.long(command))
+        func0,rms0,npoints0,y=m2fs.id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
+        func.append(func0)
+        rms.append(rms0)
+        npoints.append(npoints0)
+
+    if event.key=='z':
+        for q in range(1,len(id_lines_pix)):
+            del(id_lines_pix[len(id_lines_pix)-1])
+        for q in range(1,len(id_lines_wav)):
+            del(id_lines_wav[len(id_lines_wav)-1])
+        for q in range(1,len(id_lines_used)):
+            del(id_lines_used[len(id_lines_used)-1])
+        for q in range(1,len(order)):
+            del(order[len(order)-1])
+        for q in range(1,len(rejection_iterations)):
+            del(rejection_iterations[len(rejection_iterations)-1])
+        for q in range(1,len(rejection_sigma)):
+            del(rejection_sigma[len(rejection_sigma)-1])
+        for q in range(1,len(func)):
+            del(func[len(func)-1])
+
+    if event.key=='g':
+        func0,rms0,npoints0,y=m2fs.id_lines_fit(deepcopy(id_lines_pix),deepcopy(id_lines_wav),deepcopy(id_lines_used),order,rejection_iterations,rejection_sigma)
+        func.append(func0)
+        rms.append(rms0)
+        npoints.append(npoints0)
+
+    if event.key=='l':
+        func0,rms0,npoints0,y=m2fs.id_lines_fit(deepcopy(id_lines_pix),deepcopy(id_lines_wav),deepcopy(id_lines_used),order,rejection_iterations,rejection_sigma)
+        new_pix,new_wav,new_used=m2fs.line_id_add_lines(deepcopy(linelist),deepcopy(line_centers),deepcopy(id_lines_used),deepcopy(func0),id_lines_tol_angs)
+
+        for i in range(0,len(new_pix)):
+            id_lines_pix.append(new_pix[i])
+            id_lines_wav.append(new_wav[i])
+            id_lines_used.append(new_used[i])
+        func0,rms0,npoints0,y=m2fs.id_lines_fit(deepcopy(id_lines_pix),deepcopy(id_lines_wav),deepcopy(id_lines_used),order,rejection_iterations,rejection_sigma)
+        func.append(func0)
+        rms.append(rms0)
+        npoints.append(npoints0)
+
+    ax1,ax2=m2fs.plot_id_lines(extract1d,continuum,fit_lines,line_centers,id_lines_pix,id_lines_wav,id_lines_used,func[len(func)-1],fig)
+    fig.canvas.draw_idle()
+    return
+
+def fiddle_apertures(columnspec_array,column,window,apertures,find_apertures_file):
+    import matplotlib
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from specutils import SpectralRegion
+    import astropy.units as u
+    from astropy.modeling import models
+
+    subregion,fit,realvirtual,initial=apertures.subregion,apertures.fit,apertures.realvirtual,apertures.initial
+    subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,apertures.initial)
+
+    fig=plt.figure(1)
+    x=np.arange(0,len(columnspec_array[column].spec))
+    ax1=fig.add_subplot(111)
+    ax1.plot(columnspec_array[column].pixel,columnspec_array[column].spec,lw=0.3,color='k')
+    ax1.plot(columnspec_array[column].pixel,columnspec_array[column].continuum(x),color='green',lw=1)
+    ax1.set_xlim([0,np.max(x)])
+    for j in range(0,len(fit)):
+        use=np.where((columnspec_array[column].pixel.value>=subregion[j].lower.value)&(columnspec_array[column].pixel.value<=subregion[j].upper.value))[0]
+        sub_spectrum_pixel=columnspec_array[column].pixel[use]
+        y_fit=fit[j](sub_spectrum_pixel).value+columnspec_array[column].continuum(sub_spectrum_pixel.value)
+
+        ax1.axvline(x=fit[j].mean.value,color='b',lw=0.3,alpha=0.7)
+        ax1.plot(sub_spectrum_pixel.value,y_fit,color='r',lw=0.2,alpha=0.7)
+        ax1.set_ylim([0,10000])
+        ax1.text(fit[j].mean.value,0,str(j+1),fontsize=8)
+        if not realvirtual[j]:
+            ax1.axvline(x=fit[j].mean.value,color='k',lw=0.5,alpha=1,linestyle='--')
+
+    print('\n')
+    print('press \'r\' to reset all apertures fits \n')
+    print('press \'g\' to iteratively fit all the apertures using maximum peak \n')
+    print('press \'h\' to iteratively fit all the even apertures \n')
+    print('press \'j\' to iteratively fit all the odd apertures \n')
+    print('press \'d\' to delete aperture nearest cursor \n')
+    print('press \'e\' to delete all apertures \n')
+    print('press \'n\' to add new real aperture at cursor position \n')
+    print('press \'a\' to add new phantom aperture at cursor position \n')
+    print('press \'z\' to return to initial apertures \n')
+    print('press \'q\' to quit \n')
+    fig.canvas.mpl_disconnect(fig.canvas.manager.key_press_handler_id) # PIC This disable any key that was not set up.
+    cid=fig.canvas.mpl_connect('key_press_event',lambda event: on_key_find(event,[columnspec_array,
+                                                                                  column,subregion,
+                                                                                  fit,realvirtual,
+                                                                                  initial,window,fig]))
+    plt.show()
+#    plt.savefig(find_apertures_file,dpi=200)
+    subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+    return m2fs.aperture_profile(fit,subregion,realvirtual,initial)
+
+def on_key_find(event,args_list):
+    import numpy as np
+    import m2fs_process as m2fs
+    from specutils import SpectralRegion
+    import astropy.units as u
+    from astropy.modeling import models
+    from specutils.spectra import Spectrum1D
+
+    print('you pressed ', event.key)
+
+    keyoptions = ['z', 'd', 'e', 'n', 'a', 'q', 'r', 'g', 'h', 'j']
+
+    global columnspec_array,subregion,fit,realvirtual,initial,window
+    columnspec_array,column,subregion,fit,realvirtual,initial,window,fig=args_list
+
+    if event.key in keyoptions:
+        if event.key=='r':
+            apertures = columnspec_array[column].apertures_profile
+            subregion,fit,realvirtual,initial=apertures.subregion,apertures.fit,apertures.realvirtual,apertures.initial
+            subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,apertures.initial)
+
+        if event.key=='z':#revert to initial apertures
+            to_delete=np.where(np.logical_not(initial))[0]
+            j=0
+            for i in range(0,len(to_delete)):
+                del initial[to_delete[i]-j]
+                del subregion[to_delete[i]-j]
+                del fit[to_delete[i]-j]
+                del realvirtual[to_delete[i]-j]
+                j+=1
+            subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+
+        if event.key=='d':
+            ## PIC fixed issue by adding '.value' in the line below
+            aperture_centers=[fit[q].mean.value for q in range(0,len(fit))]
+            x0=event.xdata
+            y0=event.ydata
+            print(aperture_centers)
+            dist=(aperture_centers-event.xdata)**2
+            best=np.where(dist==np.min(dist))[0][0]
+            print('deleting aperture '+str(best+1)+', centered at '+str(aperture_centers[best]))
+            del subregion[best]
+            del fit[best]
+            del realvirtual[best]
+            del initial[best]
+            subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+
+        if event.key=='e':
+            aperture_centers=[fit[q].mean for q in range(0,len(fit))]
+            print('deleting all apertures ')
+            for q in range(0,len(subregion)):
+                del(subregion[len(subregion)-1])
+            for q in range(0,len(fit)):
+                del(fit[len(fit)-1])
+            for q in range(0,len(realvirtual)):
+                del(realvirtual[len(realvirtual)-1])
+            for q in range(0,len(initial)):
+                del(initial[len(initial)-1])
+            subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+
+        if event.key=='n':
+            new_center=np.float(event.xdata)
+            x_center=new_center
+            spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
+            subregion0,fit0=m2fs.fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+            subregion.append(subregion0)
+            fit.append(fit0)
+            realvirtual.append(True)
+            initial.append(False)
+            subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+
+        if event.key=='g':
+            ## PIC: First delete everything:
+            aperture_centers=[fit[q].mean for q in range(0,len(fit))]
+            print('deleting all apertures ')
+            for q in range(0,len(subregion)):
+                del(subregion[len(subregion)-1])
+            for q in range(0,len(fit)):
+                del(fit[len(fit)-1])
+            for q in range(0,len(realvirtual)):
+                del(realvirtual[len(realvirtual)-1])
+            for q in range(0,len(initial)):
+                del(initial[len(initial)-1])
+            ## PIC: Iterate through everything:
+            specarray = columnspec_array[column].spec ## That's the think we plot
+            idx = peak_finder(specarray)
+            ntot = len(idx)
+            for eventxdata in idx:
+                print("Fitting apertures... {:0.2f}%".format(eventxdata/ntot*100), end='\r')
+                new_center=np.float(eventxdata)
+                x_center=new_center
+                spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
+                subregion0,fit0=m2fs.fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+                subregion.append(subregion0)
+                fit.append(fit0)
+                realvirtual.append(True)
+                initial.append(False)
+            subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+            print("Fitting apertures... {:0.2f}%".format(eventxdata/ntot*100))
+
+        if event.key=='h':
+            ## PIC: First delete everything:
+            aperture_centers=[fit[q].mean for q in range(0,len(fit))]
+            print('deleting all apertures ')
+            for q in range(0,len(subregion)):
+                del(subregion[len(subregion)-1])
+            for q in range(0,len(fit)):
+                del(fit[len(fit)-1])
+            for q in range(0,len(realvirtual)):
+                del(realvirtual[len(realvirtual)-1])
+            for q in range(0,len(initial)):
+                del(initial[len(initial)-1])
+            ## PIC: Iterate through everything:
+            specarray = columnspec_array[column].spec ## That's the think we plot
+            idx = peak_finder(specarray)
+            ntot = len(idx)
+            for ieventxdata, eventxdata in enumerate(idx):
+                print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
+                if (ieventxdata%2)==0:
+                    new_center=np.float(eventxdata)
+                    x_center=new_center
+                    spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
+                    subregion0,fit0=m2fs.fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+                    subregion.append(subregion0)
+                    fit.append(fit0)
+                    realvirtual.append(True)
+                    initial.append(False)
+                    # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+                else:
+                    new_center=np.float(eventxdata)
+                    x_center=new_center
+                    val1=x_center-window/2.
+                    val2=x_center+window/2.
+                    subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
+                    aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+                    halfwindow=window/2.
+                    fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
+                    realvirtual.append(False)
+                    initial.append(False)
+                    # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
+            print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100))
+            subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
+
+        if event.key=='j':
+            ## PIC: First delete everything:
+            aperture_centers=[fit[q].mean for q in range(0,len(fit))]
+            print('deleting all apertures ')
+            for q in range(0,len(subregion)):
+                del(subregion[len(subregion)-1])
+            for q in range(0,len(fit)):
+                del(fit[len(fit)-1])
+            for q in range(0,len(realvirtual)):
+                del(realvirtual[len(realvirtual)-1])
+            for q in range(0,len(initial)):
+                del(initial[len(initial)-1])
+            # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+            ## PIC: Iterate through everything:
+            specarray = columnspec_array[column].spec ## That's the think we plot
+            idx = peak_finder(specarray)
+            ntot = len(idx)
+            for ieventxdata, enventxdata in enumerate(idx):
+                print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
+                if (ieventxdata%2)==1:
+                    new_center=np.float(enventxdata)
+                    x_center=new_center
+                    spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
+                    subregion0,fit0=m2fs.fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+                    subregion.append(subregion0)
+                    fit.append(fit0)
+                    realvirtual.append(True)
+                    initial.append(False)
+                    # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+                else:
+                    new_center=np.float(enventxdata)
+                    x_center=new_center
+                    val1=x_center-window/2.
+                    val2=x_center+window/2.
+                    subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
+                    aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+                    halfwindow=window/2.
+                    fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
+                    realvirtual.append(False)
+                    initial.append(False)
+                    # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
+            print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100))
+            subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
+
+        if event.key=='a':
+            new_center=np.float(event.xdata)
+            x_center=new_center
+            val1=x_center-window/2.
+            val2=x_center+window/2.
+            subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
+            aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+            halfwindow=window/2.
+            fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
+            realvirtual.append(False)
+            initial.append(False)
+            subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+
+        if event.key=='q':
+            plt.close(event.canvas.figure)
+            # return
+
+    x=np.arange(0,len(columnspec_array[column].spec))
+    ax1=fig.add_subplot(111)
+    ax1.cla()
+    ax1.plot(columnspec_array[column].pixel,columnspec_array[column].spec,lw=0.3,color='k')
+    # specarray = columnspec_array[column].spec ## That's the thing we plot
+    # idx = peak_finder(specarray)
+    # for i in range(len(idx)):
+    #     ax1.axvline(idx[i])
+    ax1.plot(columnspec_array[column].pixel,columnspec_array[column].continuum(x),color='green',lw=1)
+    ax1.set_xlim([0,np.max(x)])
+    for j in range(0,len(fit)):
+        use=np.where((columnspec_array[column].pixel.value>=subregion[j].lower.value)&(columnspec_array[column].pixel.value<=subregion[j].upper.value))[0]
+        sub_spectrum_pixel=columnspec_array[column].pixel[use]
+        y_fit=fit[j](sub_spectrum_pixel).value+columnspec_array[column].continuum(sub_spectrum_pixel.value)
+
+        ax1.axvline(x=fit[j].mean.value,color='b',lw=0.3,alpha=0.7)
+        ax1.plot(sub_spectrum_pixel.value,y_fit,color='r',lw=0.2,alpha=0.7)
+        ax1.text(fit[j].mean.value,0,str(j+1),fontsize=8)
+        ax1.set_ylim([0,10000])
+        if not realvirtual[j]:
+            ax1.axvline(x=fit[j].mean.value,color='k',lw=0.5,alpha=1,linestyle='--')
+    fig.canvas.draw_idle()
+    return
+
+
+def peak_finder(x):
+    nx = np.copy(x)
+    medx = np.median(x)
+    mask = nx<medx
+    # nx[nx<medx] = 0
+
+    diffs = np.diff(x)
+    diffs[diffs>0] = 1
+    diffs[diffs<0] = -1
+    diffs = np.diff(diffs)
+    diffs[mask[:-2]] = 0
+    idx = np.where(diffs<0)
+    return idx[0]+1
+
+from astropy.io import fits
+
+def gen_plugmap(filename):
+    '''Function to read the fits header a build a plug map.
+    The function will check all the fits headers for inconsistencies.
+    For now we only check the ThAr, LED, and Science frames.
+    '''     
+    statuses = []
+    headers = []
+    objtype = []
+
+    hdu = fits.open(filename)
+    for header in hdu[0].header:
+        if 'FIBER' in header:
+            stat = hdu[0].header[header]
+            statuses.append(stat)
+            headers.append(header)
+            if 'unplug' in stat.lower():
+                objtype.append('unused')
+            elif 'sky' in stat.lower():
+                objtype.append('SKY')
+            else:
+                objtype.append('TARGET')
+    hdu.close()
+
+    return statuses, headers, objtype
+
+
+def get_id_lines_template(extract1d,linelist,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order,threshold_factor,window,id_lines_order,id_lines_rejection_iterations,id_lines_rejection_sigma,id_lines_tol_angs,id_lines_template_fiddle,id_lines_template0,resolution_order,resolution_rejection_iterations):
+    import numpy as np
+    import astropy.units as u
+    from specutils.fitting import find_lines_threshold
+    from specutils.fitting import find_lines_derivative
+    from specutils.spectra import Spectrum1D
+    import matplotlib.pyplot as plt
+    from copy import deepcopy
+    from astropy.modeling import models,fitting
+
+    continuum0,spec_contsub,fit_lines=m2fs.get_fitlines(extract1d,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,threshold_factor,window,continuum_rejection_order)
+
+    line_centers=[fit_lines.fit[j].mean.value for j in range(0,len(fit_lines.fit))]
+    id_lines_pix=[]
+    id_lines_wav=[]
+    id_lines_species=[]
+    id_lines_used=[]
+    order=[id_lines_order]
+    rejection_iterations=[id_lines_rejection_iterations]
+    rejection_sigma=[id_lines_rejection_sigma]
+    func=[models.Legendre1D(degree=1)]
+    rms=[]
+    npoints=[]
+    if id_lines_template_fiddle:
+        id_lines_used=np.where(id_lines_template0.wav.mask==False)[0].tolist()
+        id_lines_pix=[id_lines_template0.fit_lines.fit[q].mean.value for q in id_lines_used]
+        id_lines_wav=id_lines_template0.wav[id_lines_used].tolist()
+        func=[id_lines_template0.func]
+        order=[id_lines_template0.func.degree]
+        rms=[id_lines_template0.rms]
+        npoints=[id_lines_template0.npoints]
+
+    fig=plt.figure(1)
+    ax1,ax2=m2fs.plot_id_lines(extract1d,continuum0,fit_lines,line_centers,id_lines_pix,id_lines_wav,id_lines_used,func[len(func)-1],fig)
+#
+    print('press \'m\' to ID line nearest cursor \n')
+    print('press \'d\' to delete ID for line nearest cursor \n')
+    print('press \'o\' to change order of polynomial \n')
+    print('press \'r\' to change rejection sigma factor \n')
+    print('press \'t\' to change number of rejection iterations \n')
+    print('press \'g\' to re-fit wavelength solution \n')
+    print('press \'l\' to add lines from linelist according to fit \n')
+    print('press \'q\' to quit \n')
+    print('press \'.\' to print cursor position and position of nearest line \n')
+    fig.canvas.mpl_disconnect(fig.canvas.manager.key_press_handler_id) # PIC This disable any key that was not set up.
+    cid=fig.canvas.mpl_connect('key_press_event',lambda event: on_key_id_lines(event,[deepcopy(extract1d),continuum0,fit_lines,linelist,line_centers,id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints,id_lines_tol_angs,fig]))
+    plt.show()
+    plt.close()
+
+    wav=np.ma.masked_array(np.full((len(fit_lines.fit)),-999,dtype='float'),mask=np.full((len(fit_lines.fit)),True,dtype=bool))
+
+    for j in range(0,len(id_lines_pix)):
+        wav[id_lines_used[j]]=id_lines_wav[j]
+        wav.mask[id_lines_used[j]]==False
+
+    resolution,resolution_rms,resolution_npoints=m2fs.get_resolution(deepcopy(fit_lines),deepcopy(wav),resolution_order,resolution_rejection_iterations)
+
+    return m2fs.id_lines(aperture=extract1d.aperture,fit_lines=fit_lines,wav=wav,func=func[len(func)-1],rms=rms[len(rms)-1],npoints=npoints[len(npoints)-1],resolution=resolution,resolution_rms=resolution_rms,resolution_npoints=resolution_npoints)
+
+
+def on_key_id_lines(event,args_list):
+    import numpy as np
+    import m2fs_process as m2fs
+    from specutils import SpectralRegion
+    import astropy.units as u
+    from astropy.modeling import models
+    from specutils.spectra import Spectrum1D
+    from astropy.modeling import models,fitting
+    from copy import deepcopy
+
+    print('you pressed ',event.key)
+
+    keyoptions = ['.', 'm', 'd', 'o', 'r', 't', 'z', 'g', 'l', 'q']
+
+    global id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints
+    extract1d,continuum,fit_lines,linelist,line_centers,id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints,id_lines_tol_angs,fig=args_list
+
+    if event.key in keyoptions:
+        if event.key=='.':
+            x0=event.xdata
+            y0=event.ydata
+            print('cursor pixel = ',str(x0))
+            dist=(line_centers-x0)**2
+            best=np.where(dist==np.min(dist))[0][0]
+            print('nearest line pixel = ',str(line_centers[best]))
+            used=np.array(np.where(id_lines_pix==line_centers[best])[0])
+            if len(used)>0:
+                print('wavelength from line list =',str(np.array(id_lines_wav)[used][0]))
+            else:
+                print('line not yet identified')
+            print('function wavelength =',str(func[len(func)-1](line_centers[best])))
+
+        if event.key=='m':
+            x0=event.xdata
+            y0=event.ydata
+            print('cursor pixel = ',str(x0))
+            dist=(line_centers-x0)**2
+            best=np.where(dist==np.min(dist))[0][0]
+            print('nearest line pixel = ',str(line_centers[best]))
+            command=input('enter wavelength in Angstroms \n')
+            if command=='':
+                print('no information entered')
+            else:
+                id_lines_pix.append(line_centers[best])
+                id_lines_wav.append(np.float(command))
+                id_lines_used.append(best)
+
+        if event.key=='d':#delete nearest boundary point
+            print('delete point nearest (',event.xdata,event.ydata,')')
+            if len(id_lines_pix)>0:
+                dist=(id_lines_pix-event.xdata)**2
+                best=np.where(dist==np.min(dist))[0][0]
+                del id_lines_pix[best]
+                del id_lines_wav[best]
+                del id_lines_used[best]
+            else:
+                print('no ID\'d lines to delete!')
+
+        if event.key=='o':
+            print('order of polynomial fit is ',order[len(order)-1])
+            command=input('enter new order (must be integer): ')
+            if command=='':
+                print('keeping original value')
+            else:
+                order.append(np.long(command))
+            func0,rms0,npoints0,y=m2fs.id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
+            func.append(func0)
+            rms.append(rms0)
+            npoints.append(npoints0)
+
+        if event.key=='r':
+            print('rejection sigma is ',rejection_sigma[len(rejection_sigma)-1])
+            command=input('enter new rejection sigma (float): ')
+            if command=='':
+                print('keeping original value')
+            else:
+                rejection_sigma.append(np.float(command))
+            func0,rms0,npoints0,y=m2fs.id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
+            func.append(func0)
+            rms.append(rms0)
+            npoints.append(npoints0)
+
+        if event.key=='t':
+            print('number of rejection iterations is ',rejection_iterations[len(rejection_iterations)-1])
+            command=input('enter new rejection iterations = (integer): ')
+            if command=='':
+                print('keeping original value')
+            else:
+                rejection_iterations.append(np.long(command))
+            func0,rms0,npoints0,y=m2fs.id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
+            func.append(func0)
+            rms.append(rms0)
+            npoints.append(npoints0)
+
+        if event.key=='z':
+            for q in range(1,len(id_lines_pix)):
+                del(id_lines_pix[len(id_lines_pix)-1])
+            for q in range(1,len(id_lines_wav)):
+                del(id_lines_wav[len(id_lines_wav)-1])
+            for q in range(1,len(id_lines_used)):
+                del(id_lines_used[len(id_lines_used)-1])
+            for q in range(1,len(order)):
+                del(order[len(order)-1])
+            for q in range(1,len(rejection_iterations)):
+                del(rejection_iterations[len(rejection_iterations)-1])
+            for q in range(1,len(rejection_sigma)):
+                del(rejection_sigma[len(rejection_sigma)-1])
+            for q in range(1,len(func)):
+                del(func[len(func)-1])
+
+        if event.key=='g':
+            func0,rms0,npoints0,y=m2fs.id_lines_fit(deepcopy(id_lines_pix),deepcopy(id_lines_wav),deepcopy(id_lines_used),order,rejection_iterations,rejection_sigma)
+            func.append(func0)
+            rms.append(rms0)
+            npoints.append(npoints0)
+
+        if event.key=='l':
+            func0,rms0,npoints0,y=m2fs.id_lines_fit(deepcopy(id_lines_pix),deepcopy(id_lines_wav),deepcopy(id_lines_used),order,rejection_iterations,rejection_sigma)
+            new_pix,new_wav,new_used=m2fs.line_id_add_lines(deepcopy(linelist),deepcopy(line_centers),deepcopy(id_lines_used),deepcopy(func0),id_lines_tol_angs)
+
+            for i in range(0,len(new_pix)):
+                id_lines_pix.append(new_pix[i])
+                id_lines_wav.append(new_wav[i])
+                id_lines_used.append(new_used[i])
+            func0,rms0,npoints0,y=m2fs.id_lines_fit(deepcopy(id_lines_pix),deepcopy(id_lines_wav),deepcopy(id_lines_used),order,rejection_iterations,rejection_sigma)
+            func.append(func0)
+            rms.append(rms0)
+            npoints.append(npoints0)
+        if event.key=='q':
+            plt.close(event.canvas.figure)
+            # return
+    
+    ax1,ax2=m2fs.plot_id_lines(extract1d,continuum,fit_lines,line_centers,id_lines_pix,id_lines_wav,id_lines_used,func[len(func)-1],fig)
+    fig.canvas.draw_idle()
+    return
+
+
+
+def get_meansky(throughputcorr_array,wavcal_array,plugmap):
+    '''
+    throughputcorr_array:   All the spectra from all the apertures
+    wavcal_array        :   Wavelength solution for all of the apertures
+    plugmap             :   Map containing the position of the skies
+    '''
+
+    import numpy as np
+    import scipy
+    import astropy.units as u
+    from specutils.spectra import Spectrum1D
+    from astropy.modeling import models,fitting
+    import matplotlib.pyplot as plt
+    from astropy.nddata import StdDevUncertainty
+
+    ## Iterate through all the apertures
+    ## Take the spectrum, the wavelength and mask
+    ## Search for the wav_min and wav_max marking the position
+    ## of the first and last unmasked spectrum
+
+    wav_min=[]
+    wav_max=[]
+    npix=[]
+    use=[]
+    for i in range(0,len(throughputcorr_array)):
+        pix=throughputcorr_array[i].spec1d_pixel
+        wav=np.array(wavcal_array[i].wav)
+        keep=np.where(throughputcorr_array[i].spec1d_mask==False)[0]
+        if ((len(wav)>0)&(len(keep)>0)):
+            wav_min.append(np.min(wav[throughputcorr_array[i].spec1d_mask==False]))
+            wav_max.append(np.max(wav[throughputcorr_array[i].spec1d_mask==False]))
+            npix.append(len(np.where(throughputcorr_array[i].spec1d_mask==False)[0]))
+            use.append(1)
+        else:
+            wav_min.append(1.e+10)
+            wav_max.append(-1.e+10)
+            npix.append(0)
+            use.append(0)
+    wav_min=np.array(wav_min)
+    wav_max=np.array(wav_max)
+    npix=np.array(npix)
+    use=np.array(use)
+
+
+    ## Initialize the meansky object - placing a zero in the fields
+    meansky=Spectrum1D(spectral_axis=np.array([0.])*u.AA,flux=np.array([0.])*u.electron,uncertainty=StdDevUncertainty(np.array([np.inf])),mask=np.array([True]))
+    ## If there are multiple apertures
+    ## If we selected multiple apertures to use
+    ## Create a linspace wavelength array of length 10 times the median of the number of pixels to use
+    ## select all the skies
+    ## For each sky
+    ## interpolate the flux, uncertainties and mask - what is the interpolation of the mask gonna give?
+    ## Store that in arrays
+    if len(throughputcorr_array)>0:
+        if len(wav_min[use==1])>0:
+            wav0=np.linspace(np.min(wav_min[use==1]),np.max(wav_max[use==1]),np.long(np.median(npix[use==1])*10))
+#            id_nlines=np.array([len(np.where(id_lines_array[q].wav>0.)[0]) for q in range(0,len(id_lines_array))],dtype='int')
+            skies=np.where(((plugmap['objtype']=='SKY')|(plugmap['objtype']=='unused'))&(np.array([len(wavcal_array[q].wav) for q in range(0,len(wavcal_array))])>0))[0]
+            targets=np.where((plugmap['objtype']=='TARGET')&(np.array([len(wavcal_array[q].wav) for q in range(0,len(wavcal_array))])>0))[0]
+
+            sky_flux_array=[]
+            sky_err_array=[]
+            sky_mask_array=[]
+
+            for i in range(0,len(skies)):
+
+                # from IPython import embed
+                # embed()
+#            use=np.where(throughputcorr_array[skies[i]].spec1d_mask==False)[0]
+                wav=wavcal_array[skies[i]].wav
+                #################################################
+                #################################################
+                ## PIC:
+                ## /!\ CAUTION: Here I hardcode some stuff that really shouldn't
+                #################################################
+                bounds = [6565.08, 6568.47]
+                idxinvalid = np.where((wav>bounds[0])&(wav<bounds[1]))
+                throughputcorr_array[skies[i]].spec1d_flux.value[idxinvalid] = 1
+                #################################################
+                #################################################
+                if len(wav)>0:
+                    sky_flux_array.append(np.interp(wav0,wav,throughputcorr_array[skies[i]].spec1d_flux))
+                    sky_err_array.append(np.interp(wav0,wav,throughputcorr_array[skies[i]].spec1d_uncertainty.quantity.value))
+                    sky_mask_array.append(np.interp(wav0,wav,throughputcorr_array[skies[i]].spec1d_mask))
+            sky_flux_array=np.array(sky_flux_array)
+            sky_err_array=np.array(sky_err_array)
+            sky_mask_array=np.array(sky_mask_array)
+
+            ## For each wavelength bin, take data in each aperture in one array (column)
+            ## Same thing with mask
+            ## For each aperture,
+            ## In the column, see if some points are out of bounds and mask these out
+            ## Take the median on the valid bins.
+
+            sky0_flux=[]
+            sky0_err=[]
+            sky0_mask=[]
+            for i in range(0,len(wav0)):
+                # vec=np.array([sky_flux_array[q][i] for q in range(0,len(sky_flux_array))],dtype='float')
+                vec = []
+                for q in range(len(sky_flux_array)):
+                    vec.append(sky_flux_array[q][i])
+                vec=np.array(vec,dtype='float')
+                # vec_mask=np.array([sky_mask_array[q][i] for q in range(0,len(sky_flux_array))],dtype='bool')
+                vec_mask = []
+                for q in range(len(sky_mask_array)):
+                    vec_mask.append(sky_mask_array[q][i])
+                vec_mask = np.array(vec_mask, dtype='bool')
+                for j in range(0,len(vec)):
+                    if wav_min[skies[j]]>wav0[i]:
+                        vec_mask[j]=True
+                    if wav_max[skies[j]]<=wav0[i]:
+                        vec_mask[j]=True
+                med=np.median(vec[vec_mask==False])
+                mad=np.median(np.abs(vec[vec_mask==False]-med))*1.4826*np.sqrt(np.pi/2.)/np.sqrt(np.float(len(np.where(vec_mask==False)[0])))
+
+                sky0_flux.append(med)
+                sky0_err.append(mad)
+                if med!=med:
+                    sky0_mask.append(True)
+                else:
+                    sky0_mask.append(False)
+            sky0_flux=np.array(sky0_flux)
+            sky0_err=np.array(sky0_err)
+            sky0_mask=np.array(sky0_mask)
+        else:
+            wav0=[0.]
+            sky0_flux=np.array([0.])
+            sky0_err=np.array([0.])
+            sky0_mask=np.array([True])
+
+        ## Populate the object
+        meansky=Spectrum1D(spectral_axis=wav0*u.AA,flux=sky0_flux*u.electron,uncertainty=StdDevUncertainty(sky0_err),mask=sky0_mask)
+    return meansky
+
+from irap_tools import normalizationTools as norm_tools
+
+
+def fit_continuum(wvl, flux, wvl_ref = None, window_size=200, p=95, degree=3, 
+                m=0.5):
+    '''
+    Returns the coefficients of the polynomial fitted on the pth percentiles
+    computed on windows of length window_size.
+    Input parameters:
+    - wvl           :   [1d-array] Wavelength grid.
+    - flux          :   [1d-array] Array to normalize.
+    - window_size   :   [int] desired length of the window size used 
+                        to split flux.
+    - p             :   [int] percentile value (0--100) computed on 
+                        window_size sections of the flux
+    Output parameters:
+    - continuum     :   Continuum computed on the input wvl grid.
+    - [_]           :   [list] containing :
+        -- wvls             Wavelengths associated to percentiles
+        -- percentiles      Percentiles
+    '''
+    if wvl_ref is None:
+        wvl_init = np.copy(wvl)
+    else:
+        wvl_init = wvl_ref
+    _flux = np.copy(flux)
+    ## THE SECTION IS COMMENTED BECAUSE IT COULD ACTUALLY INTRODUCE ERRORS IN
+    ## THE PERCENTILES COMPUTATION
+    # ## Initial step: We try to ignore the NaNs by removing them
+    # idx = np.where(np.isnan(_flux))
+    # _flux = np.delete(_flux, idx)
+    # wvl = np.delete(wvl, idx)
+    ## First step is to split the input array in windows of a given size
+    if window_size>len(_flux):
+        raise Exception("Window size must be smaller than len(x)")
+    if len(flux)%window_size != 0:
+        nb_of_sections = int(np.floor(len(_flux)/window_size))
+        new_length = window_size * nb_of_sections
+        diff_length = len(_flux) - new_length
+        _flux = _flux[diff_length:]
+        wvl = wvl[diff_length:]
+        warnings.warn('len(flux)/window_size does not result in equal division. Cutting input arrays')
+    else :
+        nb_of_sections = len(_flux)//window_size
+    ## Use this nunber of sections to split the input array
+    flux_splited = np.split(_flux, nb_of_sections)
+    wvl_splited = np.split(wvl, nb_of_sections)
+    ## TODO: Improve selection of wavelength associated to the percentile
+    wvls = np.mean(wvl_splited, axis=1) 
+    percentiles = np.nanpercentile(flux_splited, p, axis=1)
+    ## Determine the associated wavelength
+    new_wvls = []
+    for i in range(len(flux_splited)):
+        _f = flux_splited[i]
+        _w = wvl_splited[i]
+        _p = percentiles[i]
+        if np.isnan(_p):
+            _w = np.mean(_w)
+        elif not np.isnan(_p):
+            _f[np.isnan(_f)] = 0
+            idx = np.argsort(_f)
+            _f = _f[idx]
+            _w = _w[idx]
+            _w = _w[_f>=_p][0]
+        new_wvls.append(_w)
+    wvls = np.array(new_wvls)
+    ## Removing values varying of 10% from pth percentile of entire flux
+    ## TODO: improve by rejecting points based on percentile environment,
+    ## i.e. what the values of percentile are
+    median = np.mean(percentiles)
+    idx = np.where(percentiles>(median+m*median))
+    wvls = np.delete(wvls, idx)
+    percentiles = np.delete(percentiles, idx)
+    idx = np.where(percentiles<(median-m*median))
+    wvls = np.delete(wvls, idx)
+    percentiles = np.delete(percentiles, idx)
+    ## VERY IMPORTANT -- Removing values that are still NaN in percentiles
+    idx = np.where(np.isnan(percentiles))
+    wvls = np.delete(wvls, idx)
+    percentiles = np.delete(percentiles, idx)
+    if len(percentiles)==0:
+        continuum = np.ones(np.shape(wvl_init))*np.mean(_flux)
+    elif len(percentiles)<degree:
+        x = norm_tools.normalize_axis(wvls, wvls)
+        coeffs = norm_tools.fit_1d_polynomial(x, percentiles, degree=len(percentiles))
+        continuum = norm_tools.polynom(norm_tools.normalize_axis(wvl_init, wvls), coeffs)
+    else:
+        x = norm_tools.normalize_axis(wvls, wvls)
+        coeffs = norm_tools.fit_1d_polynomial(x, percentiles, degree=degree)
+        continuum = norm_tools.polynom(norm_tools.normalize_axis(wvl_init, wvls), coeffs)
+    ## Fit n degree polynomial on the percentiles
+    ## CAUTION: Here we add a step to avoid fitting issues. We normalize the
+    ## wvls to be fitted. 
+    # x = normalize_axis(wvls, wvls)
+    # coeffs = fit_1d_polynomial(x, percentiles, degree=degree)
+    # continuum = polynom(normalize_axis(wvl_init, wvls), coeffs)
+    return continuum, [wvls,percentiles], coeffs
+
+def normalize(x, y):
+    _x = np.copy(x); _y = np.copy(y)
+    ## Select the points of the continuum
+    med = np.median(_y)
+    rms = np.std(_y)
+    idx = ((_y>med-3*rms) & (_y<med+3*rms) & (_y!=0))
+
+    if len(idx[idx==True])<5:
+        # print('Not enough points')
+        c = np.ones(len(y))
+        ps = [np.nan, np.nan]
+        return _x, _y, c, ps
+    _y = _y[idx]
+    _x = _x[idx]
+
+    c, ps, coeffs = fit_continuum(
+                wvl=_x,
+                flux=_y,
+                window_size=9,
+                p=50,
+                degree=3,
+                m=50)
+    
+    # _y / c
+
+    # c, ps, coeffs = fit_continuum(
+    #         wvl=_x,
+    #         flux=_y/c,
+    #         window_size=9,
+    #         p=50,
+    #         degree=3,
+    #         m=50)
+
+    nx = norm_tools.normalize_axis(x, x)
+
+    c = norm_tools.polynom(nx, coeffs)
+
+    return _x, _y, c, ps
+
+def normalize_old(wvl, flux, err, p=95, hws=150, degree=3):
+    # Define local vars
+    _w = wvl
+    _f = flux
+
+    med = np.median(flux)
+    rms = np.std(flux)
+    _f[_f>med+rms] = np.nan
+    _f[_f<med-rms] = np.nan
+
+    def return_continuum(degree):
+        c, ps = norm_tools.fit_continuum(
+            wvl=_w,
+            flux=_f,
+            window_size=hws,
+            p=p,
+            degree=degree,
+            m=50)
+        return c, ps
+    d = degree
+    success = False
+    while not success and d > 0:
+        try:
+            c, ps = return_continuum(d)
+            success = True
+        except:
+            d = d-1
+    if d == 0:
+        c = np.nanpercentile(flux, 95) *\
+            np.ones(len(_f))
+        ps = np.array([[0], [0]])
+        # raise Exception('Negative degree')
+    wps = ps[0]
+    ps = ps[1]
+    # Correct with continuum
+    norm_flux = flux/c
+    norm_err = err/c
+    return c
+
+from specutils.spectra import Spectrum1D
+def get_throughput_continuum(twilightstack_array,twilightstack_wavcal_array,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order):
+    
+    '''Function designed to fit the throughput continuum?'''
+    
+    # import numpy as np
+    # import astropy.units as u
+    # from specutils.fitting import find_lines_threshold
+    # from specutils.fitting import find_lines_derivative
+    # from copy import deepcopy
+    # import matplotlib.pyplot as plt
+    # from astropy.modeling import models
+    # from scipy import interpolate
+    # import scipy
+
+    continuum_array=[]
+    wav_min=[]
+    wav_max=[]
+    npix=[]
+    use=[]
+    ## For each aperture
+    ## If there are more the 1 valid bins to and the wavelength array is longer than 0
+    ##  
+    for i in range(0,len(twilightstack_array)):
+        wav=twilightstack_wavcal_array[i].wav
+        if ((len(np.where(twilightstack_array[i].spec1d_mask==False)[0])>1)&(len(wav)>0)):
+            
+            # polomask = np.ones(len(twilightstack_array[i].spec1d_mask))
+            # polomask[100:200] = 0
+            polomask = twilightstack_array[i].spec1d_mask.astype(int)
+            spec1d0=Spectrum1D(spectral_axis=wav*u.AA,
+                               flux=deepcopy(twilightstack_array[i].spec1d_flux)*u.electron,
+                               uncertainty=deepcopy(twilightstack_array[i].spec1d_uncertainty),
+                               mask=deepcopy(polomask))
+                            #    mask=deepcopy(twilightstack_array[i].spec1d_mask))
+            ## PIC: Trying to ignore the apertures for which we have an issue
+            # print("Now for aperture {}".format(i))
+            # try:
+            continuum0,rms0=get_continuum(spec1d0,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order)
+            continuum_array.append(continuum0)
+            wav_min.append(np.min(wav[twilightstack_array[i].spec1d_mask==False]))
+            wav_max.append(np.max(wav[twilightstack_array[i].spec1d_mask==False]))
+            npix.append(len(np.where(twilightstack_array[i].spec1d_mask==False)[0]))
+            use.append(1)
+            # print(i)
+            # if i==1:
+            #     from IPython import embed
+            #     embed()
+            # except:
+            #     print(i)
+            #     from IPython import embed
+            #     embed()
+            #     continuum0,rms0=get_continuum(spec1d0,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order,debug=True)
+
+            #     print("Issue for aperture {}".format(i))
+            #     wav_min.append(-999.)
+            #     wav_max.append(-999.)
+            #     npix.append(0)
+            #     use.append(0)
+            #     continuum_array.append(models.Chebyshev1D(degree=1))
+        else:
+            wav_min.append(-999.)
+            wav_max.append(-999.)
+            npix.append(0)
+            use.append(0)
+            continuum_array.append(models.Chebyshev1D(degree=1))
+#        plt.plot(wav[twilightstack_array[i].spec1d_mask==False],twilightstack_array[i].spec1d_flux[twilightstack_array[i].spec1d_mask==False],color='k',lw=0.3)
+#        plt.plot(wav,continuum0(wav),color='r',lw=0.3)
+#        plt.ylim([0,30000])
+#        plt.show()
+#        plt.close()
+    use=np.array(use)
+    wav_min=np.array(wav_min)
+    wav_max=np.array(wav_max)
+    npix=np.array(npix)
+    continuum_array=np.array(continuum_array)
+    if((len(twilightstack_array)>0)&(len(np.where(use==1)[0])>0)):
+        wav0=np.linspace(np.min(wav_min[use==1]),np.max(wav_max[use==1]),np.long(np.median(npix[use==1])))
+        flux0=[]#np.zeros(len(wav0))
+        mask0=[]
+        for j in range(0,len(wav0)):
+            keep=np.where((wav_min<=wav0[j])&(wav_max>=wav0[j])&(use==1))[0]
+            if len(keep)>0:
+                flux0.append(np.median([continuum_array[q](wav0[j]) for q in keep]))
+                mask0.append(False)
+            else:
+                flux0.append(0.)
+                mask0.append(True)
+        flux0=np.array(flux0)    
+        mask0=np.array(mask0)
+        spec1d0=Spectrum1D(spectral_axis=wav0*u.AA,flux=flux0*u.electron,mask=mask0)
+        continuum0,rms0=m2fs.get_continuum(spec1d0,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order)
+        
+#        plt.plot(spec1d0.spectral_axis,spec1d0.flux)
+#        plt.plot(spec1d0.spectral_axis,continuum0(spec1d0.spectral_axis.value))
+#        plt.show()
+#        plt.close()
+#        np.pause()
+    else:
+        continuum0=models.Chebyshev1D(degree=1)
+        rms0=-999.
+
+    return continuum_array,continuum0
+
+
+from astropy.modeling import models,fitting
+def get_continuum(spec1d,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order,debug=False):
+    # import numpy as np
+    # import astropy.units as u
+    # from copy import deepcopy
+    # import copy
+    # import matplotlib.pyplot as plt
+    if debug:
+        from IPython import embed
+        embed()
+
+
+#    continuum_init=models.Polynomial1D(degree=10)
+    ## Initialize the continuum object and fitter
+    continuum_init=models.Chebyshev1D(degree=continuum_rejection_order)
+    fitter=fitting.LinearLSQFitter()
+#    lamb=(np.arange(len(spec1d.data),dtype='float'))*u.AA#unit is pixels, but specutils apparently can't handle that, so we lie and say Angs.
+    lamb=spec1d.spectral_axis#(np.arange(len(spec1d.spectral_axis),dtype='float'))*u.AA#unit is pixels, but specutils apparently can't handle that, so we lie and say Angs.
+    y=np.ma.masked_array(spec1d.flux,mask=spec1d.mask.astype(bool))
+
+    ## For each iteration in the continuum_rejection_iterations (???)
+    ## If we do have enough points 
+    for q in range(0,continuum_rejection_iterations):
+        ## PIC, we must have at least 4 points to fit a 4 degree polynomial, so the
+        ## following safeguard cannot actually work.
+        ## I replace:
+        # if len(np.where(y.mask==False)[0])>0: 
+        ## with:
+        if len(np.where(y.mask==False)[0])>continuum_rejection_order:         
+            continuum=fitter(continuum_init,lamb.value[y.mask==False],y[y.mask==False])
+        else:
+            continuum=continuum_init
+
+
+
+
+
+#        continuum=fitter(continuum_init,lamb.value,y)
+        ## Compute the RMS between the continuum and the twilight
+        ## Mask outliers
+        ## Rerun (this is a sigma clipping pretty much...)
+        rms=np.sqrt(np.mean((y.data.value[y.mask==False]-continuum(lamb.value)[y.mask==False])**2))    
+        outlier=(np.where(spec1d.data-continuum(lamb.value)>continuum_rejection_high*rms))[0]#reject only high outliers (emission lines)
+        y.mask[outlier]=True
+        outlier=(np.where(spec1d.data-continuum(lamb.value)<continuum_rejection_low*rms))[0]#reject only high outliers (emission lines)
+        y.mask[outlier]=True
+#        outlier=(np.where(spec1d.data-continuum(lamb.value)>1.*spec1d.uncertainty.quantity.value))[0]#reject only high outliers (emission lines)
+#        y.mask[outlier]=True
+
+        # print(len(y.data), len(continuum(lamb.value)))
+        # res = y.data.value-continuum(lamb.value)
+        # res2 = spec1d.data-continuum(lamb.value)
+        # plt.figure()
+        # plt.plot(lamb.value, spec1d.data)
+        # plt.plot(lamb.value, y.mask*np.max(res))
+        # plt.plot(lamb.value, continuum(lamb.value))
+        # plt.show()
+
+        # from IPython import embed
+        # embed()
+        
+
+    return continuum,rms
+
+def get_skysubtract(meansky,i,throughputcorr_array,wavcal_array):
+    # import numpy as np
+    # import scipy
+    # import astropy.units as u
+    # from specutils.spectra import Spectrum1D
+    # from astropy.modeling import models,fitting
+    # import matplotlib.pyplot as plt
+    # from astropy.nddata import StdDevUncertainty
+    # from copy import deepcopy
+#        sky=Spectrum1D(spectral_axis=np.arange(len(sky0_flux))*u.AA,flux=sky0_flux*u.electron,uncertainty=StdDevUncertainty(sky0_err),mask=sky0_mask),True))
+
+    spec1d0=Spectrum1D(spectral_axis=throughputcorr_array[i].spec1d_pixel*u.AA,flux=throughputcorr_array[i].spec1d_flux,uncertainty=throughputcorr_array[i].spec1d_uncertainty,mask=throughputcorr_array[i].spec1d_mask)
+    sky0=Spectrum1D(spectral_axis=throughputcorr_array[i].spec1d_pixel*u.AA,flux=np.zeros(len(throughputcorr_array[i].spec1d_mask))*u.electron,uncertainty=np.full(len(throughputcorr_array[i].spec1d_mask),np.inf),mask=np.full(len(throughputcorr_array[i].spec1d_mask),True))
+    wav0=meansky.spectral_axis.value
+    wav=wavcal_array[i].wav
+    skysubtract0=deepcopy(spec1d0)
+    skysubtract0.mask=np.full(len(skysubtract0.flux),True,dtype=bool)
+
+    if len(wav)>0:
+        sky_flux=np.interp(wav,wav0,meansky.flux)
+        sky_err=np.interp(wav,wav0,meansky.uncertainty.quantity.value)
+        sky_mask=np.interp(wav,wav0,meansky.mask)
+        sky0=Spectrum1D(spectral_axis=throughputcorr_array[i].spec1d_pixel*u.AA,flux=sky_flux,uncertainty=StdDevUncertainty(sky_err),mask=sky_mask)
+        
+        continuum0,rms0=get_continuum(sky0,-5,1,10,10)
+        wtest = continuum0(np.arange(len(sky0.data)))
+        test = deepcopy(sky0)
+        testsub = test.subtract(sky0*0+100)
+        skysubtract0=spec1d0.divide(sky0)
+
+        # from IPython import embed
+        # embed()
+        # plt.figure()
+        # plt.plot(spec1d0.flux)
+        # plt.plot(skysubtract0.flux)
+        # plt.plot(sky0.flux)
+        # plt.show()
+
+    sky=m2fs.extract1d(throughputcorr_array[i].aperture,spec1d_pixel=throughputcorr_array[i].spec1d_pixel,spec1d_flux=sky0.flux,spec1d_uncertainty=sky0.uncertainty,spec1d_mask=sky0.mask)
+    skysubtract=m2fs.extract1d(throughputcorr_array[i].aperture,spec1d_pixel=throughputcorr_array[i].spec1d_pixel,spec1d_flux=skysubtract0.flux,spec1d_uncertainty=skysubtract0.uncertainty,spec1d_mask=skysubtract0.mask)
+    return sky,skysubtract
