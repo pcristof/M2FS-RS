@@ -1313,6 +1313,7 @@ def fit_continuum(wvl, flux, wvl_ref = None, window_size=200, p=95, degree=3,
     percentiles = np.delete(percentiles, idx)
     if len(percentiles)==0:
         continuum = np.ones(np.shape(wvl_init))*np.mean(_flux)
+        coeffs = np.array([0, 1])
     elif len(percentiles)<degree:
         x = norm_tools.normalize_axis(wvls, wvls)
         coeffs = norm_tools.fit_1d_polynomial(x, percentiles, degree=len(percentiles))
