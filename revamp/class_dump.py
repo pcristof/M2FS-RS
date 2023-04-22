@@ -65,7 +65,8 @@ class ReduceM2FS:
         ## Let's store here the result of initialize:
         self.columnspec_array = []
         self.throughputcorr_bool = False ## Indicator for whether data was throughput correted.
-
+        self.crreject_bool = False
+        
         ## Let us define some of the fundamental variables for the analysis
         self.trace_step = 20 # Nb columns combined when scanning across rows to identify apertures 
         self.n_lines = self.trace_step # tracing steps - Always the same?
@@ -165,7 +166,7 @@ class ReduceM2FS:
         '''This function is meant to create the file lists based on one single 
         input text file.
         The file lists must be exaustive and will be stored in dictionaries.'''
-        utdate = self.utdate
+        # utdate = self.utdate
         f = open(filename, 'r')
         list_dict = {}
         for line in f.readlines():
@@ -219,18 +220,22 @@ class ReduceM2FS:
                 arc_ref = int(float(sl[7]))
             else:
                 arc_ref = led_list[0]
+            list_dict[utdate]['led_ref'] = led_ref
+            list_dict[utdate]['arc_ref'] = arc_ref
         f.close()
 
-        if utdate is None:
-            utdate = list_dict.keys()[0] ## Default is the first one
-
-        self.sci_list = list_dict[utdate]['sci_list']
-        self.arc_list = list_dict[utdate]['arc_list']
-        self.led_list = list_dict[utdate]['led_list']
-        self.bias_list = list_dict[utdate]['bias_list']
-        self.dark_list = list_dict[utdate]['dark_list']
-        self.all_list = np.concatenate([sci_list, arc_list, led_list], 0)
-        self.full_list  = np.concatenate([sci_list, arc_list, led_list, bias_list, dark_list], 0)
+        if self.utdate is None:
+            self.utdate = list_dict.keys()[0] ## Default is the first one
+        utdate = self.utdate # Safeguard because my implementation is crappy.
+        led_ref = list_dict[self.utdate]['led_ref']
+        arc_ref = list_dict[self.utdate]['arc_ref']
+        self.sci_list = list_dict[self.utdate]['sci_list']
+        self.arc_list = list_dict[self.utdate]['arc_list']
+        self.led_list = list_dict[self.utdate]['led_list']
+        self.bias_list = list_dict[self.utdate]['bias_list']
+        self.dark_list = list_dict[self.utdate]['dark_list']
+        self.all_list = np.concatenate([self.sci_list, self.arc_list, self.led_list], 0)
+        self.full_list  = np.concatenate([self.sci_list, self.arc_list, self.led_list, self.bias_list, self.dark_list], 0)
         self.led_ref = led_ref
         self.arc_ref = arc_ref
 
@@ -299,14 +304,21 @@ class ReduceM2FS:
        
         self.stack_array_files = {}
         self.stack_wavcal_array_files = {}
+        self.stack_array_files_nosky = {}
+        self.stack_wavcal_array_files_nosky = {}
         for ccd in ['r', 'b']:    
-            self.stack_array_files[ccd] = self.outpath + "{}-stack-array.pickle".format(ccd)
+            self.stack_array_files[ccd] = self.outpath + "{}-stack-array-skysubtract.pickle".format(ccd)
+            self.stack_array_files_nosky[ccd] = self.outpath + "{}-stack-array.pickle".format(ccd)
             self.stack_wavcal_array_files[ccd] = self.outpath \
+                + "{}-stack-wavcal-array-skysubtract.pickle".format(ccd)
+            self.stack_wavcal_array_files_nosky[ccd] = self.outpath \
                 + "{}-stack-wavcal-array.pickle".format(ccd)
 
         ## Generate the output paths
         self.plugmap_file = self.outpath \
                             + "{}{:04d}-plugmap.pickle".format(self.ccd, self.led_ref)
+        self.plugmap_txtfile = self.outpath \
+                            + "{}-plugmap.txt".format(self.ccd)
         self.image_boundary_file = self.outpath \
                             + "{}{:04d}-image-boundary.pickle".format(self.ccd, self.led_ref)
         self.columnspec_array_file = self.outpath \
@@ -324,13 +336,18 @@ class ReduceM2FS:
         ## And now the results fits filenames
         self.fits_files = {}
         self.fits_stack = {}
+        self.extract1d_fits_files = {}
+        self.extract1d_fits_stack = {}
         for ccd in ['r', 'b']:
             for file_id in self.sci_list:
                 self.fits_files[(self.utdate, ccd, file_id)] = self.outpath \
+                    + "{}-{}{:04d}-results-skysubtract.fits".format(self.utdate, ccd, file_id)
+                self.extract1d_fits_files[(self.utdate, ccd, file_id)] = self.outpath \
                     + "{}-{}{:04d}-results.fits".format(self.utdate, ccd, file_id)
             self.fits_stack[(self.utdate, ccd)] = self.outpath \
+                    + "{}-{}-results-skysubtract.fits".format(self.utdate, ccd)
+            self.extract1d_fits_stack[(self.utdate, ccd)] = self.outpath \
                     + "{}-{}-results.fits".format(self.utdate, ccd)
-
 
     ########################################
     #### PRE REDUCTION (FRAME STICHING) ####
@@ -344,7 +361,7 @@ class ReduceM2FS:
                             self.masterbiasframes[(self.ccd, tile)], self.masterdarkframes[(self.ccd, tile)])  
     def stitch_frames(self):
         ## For each file name, and for the global ccd, we combine the tiles.
-        for file_id in [self.all_list[0]]:
+        for file_id in self.all_list:
             fdump.stitch_frames(self.ccd, file_id, self.rawfiledict, self.masterbiasframes, 
                                 self.masterdarkframes, self.filedict)    
     ## --                              -- ##
@@ -383,8 +400,10 @@ class ReduceM2FS:
 
         ## We then take the first file headers: 
         objtype = objtype[0]
+        identifiers = statuses[0]
 
-        objtype=np.array(objtype)[::-1]
+        objtype = np.array(objtype)[::-1]
+        identifiers = np.array(identifiers)[::-1]
         objcol = fits.Column(name='OBJTYPE',format='A6',array=objtype)
         apcol = fits.Column(name='APERTURE',format='I',array=np.arange(nbfibers)+1)
         cols=fits.ColDefs([objcol, apcol])
@@ -392,6 +411,14 @@ class ReduceM2FS:
 
         pickle.dump(plugmap_table_hdu, open(self.plugmap_file,'wb'))
 
+        plugstring = ""
+        for i in range(len(objtype)):
+            plugstring += "{:2} {:10} {:10}\n".format(i+1, objtype[i], identifiers[i])
+        f = open(self.plugmap_txtfile, 'w')
+        f.write(plugstring)
+        f.close()
+        # from IPython import embed
+        # embed()
         return plugmap_table_hdu
 
     def gen_plugmap2(self):
@@ -428,6 +455,47 @@ class ReduceM2FS:
             # from IPython import embed
             # embed()
         
+    def auto_trim(self, led_id=None):
+        '''This function will launch an interactive window to trim
+        the image so that the user can choose the region to analyze.
+        Input: thar_ref'''
+        
+        if led_id is None: led_id = self.led_ref
+        data_file = self.filedict[(self.ccd, led_id)]
+        data=astropy.nddata.CCDData.read(data_file)
+        ## work file
+        image_boundary_file = self.image_boundary_file
+        image_boundary_exists=path.exists(image_boundary_file) # Exists?
+        # #
+        # if ((image_boundary_exists)&(self.overwrite)):
+        #     image_boundary0=pickle.load(open(image_boundary_file,'rb'))
+        #     image_boundary_fiddle=True
+        #     image_boundary=m2fs.get_image_boundary(data,image_boundary_fiddle,image_boundary0)
+        #     print("go")
+        #     pickle.dump(image_boundary,open(image_boundary_file,'wb'))#save pickle to file
+        # elif (not(image_boundary_exists)):
+        #     image_boundary0=m2fs.image_boundary()
+        #     image_boundary_fiddle=False
+        #     image_boundary=m2fs.get_image_boundary(data,image_boundary_fiddle,image_boundary0)
+        #     pickle.dump(image_boundary,open(image_boundary_file,'wb'))#save pickle to file
+        
+        ## Let's hardcode some boundaries:
+        x1 = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        x2 = np.array([2048, 2048, 2048, 2048, 2048, 
+                       2048, 2048, 2048, 2048, 2048])
+        y1 = np.array([0, 250, 500, 750, 1000, 
+                       1250, 1520, 1780, 2056, 2056])
+        y2 = np.array([0, 51,  290, 360, 790, 
+                       1040, 1290, 1550, 1820, 2056])
+        image_boundary0=m2fs.image_boundary()
+        image_boundary_fiddle=False
+        image_boundary = m2fs.image_boundary(lower=[(x1[q],y1[q]) 
+                              for q in range(0,len(x1))],
+                       upper=[(x2[q],y2[q]) 
+                              for q in range(0,len(x2))])
+        pickle.dump(image_boundary,open(image_boundary_file,'wb'))#save pickle to file
+        return 1
+
     def trim(self, led_id=None):
         '''This function will launch an interactive window to trim
         the image so that the user can choose the region to analyze.
@@ -1415,7 +1483,7 @@ class ReduceM2FS:
                 pickle.dump(continuum, open(continuum_array_file, 'wb'))
                 print('skysubstract: Done')
 
-    def stack_frames(self):
+    def _stack_frames(self, kind='skycorr'):
         stack_array_file = self.stack_array_files[self.ccd]
         stack_array_exists=path.exists(stack_array_file)
 
@@ -1442,15 +1510,24 @@ class ReduceM2FS:
                 # skysubtract_array_file = self.tmppath + "{}{:04d}-skysubtract-array.pickle".format(self.ccd, file_id)
                 if self.throughputcorr_bool:
                     infile = self.tmppath + "{}{:04d}-throughputcorr-array.pickle".format(self.ccd, file_id)
-                else:
+                elif self.crreject_bool:
                     infile = self.cr_reject_array_files[(self.ccd, file_id)]
+                else:
+                    infile = self.extract1d_array_files[(self.ccd, file_id)]
                     # infile = self.tmppath + "{}{:04d}-cr-reject-array.pickle".format(self.ccd, file_id)
                 wavcal_array_file = self.wavcal_array_files[(self.ccd, file_id)]
                 # wavcal_array_file = self.tmppath + "{}{:04d}-wavcal-array.pickle".format(self.ccd, file_id)
 
                 wavcal_array=pickle.load(open(wavcal_array_file,'rb'))
-                skysubtract_array=pickle.load(open(skysubtract_array_file,'rb'))
-                throughputcorr_array=pickle.load(open(infile,'rb'))
+                if 'skycorr' in kind:
+                    skysubtract_array=pickle.load(open(skysubtract_array_file,'rb'))
+                    stack_wavcal_array_file = self.stack_wavcal_array_files[self.ccd]
+                    stack_array_file = self.stack_array_files[self.ccd]
+                if 'raw' in kind:
+                    skysubtract_array=pickle.load(open(infile,'rb'))
+                    stack_wavcal_array_file = self.stack_wavcal_array_files_nosky[self.ccd]
+                    stack_array_file = self.stack_array_files_nosky[self.ccd]
+                # throughputcorr_array=pickle.load(open(infile,'rb'))
 #                    wavcal_array=pickle.load(open(wavcal_array_file,'rb'))
 #                    id_lines_array_file=datadir+utdate[i]+'/'+ccd+str(tharfile0[i][j]).zfill(4)+'_id_lines_array.pickle'
 #                    id_lines_array=pickle.load(open(id_lines_array_file,'rb'))
@@ -1485,16 +1562,18 @@ class ReduceM2FS:
             for j in range(0,len(skysubtract_array)):
                 print('stackwavcal working on aperture',j+1,' of ',len(skysubtract_array))
                 stack_wavcal_array.append(m2fs.get_wav(j,thar,skysubtract_array,thar_mjd,mjd_weightedmean,id_lines_minlines))
-            stack_wavcal_array_file = self.stack_wavcal_array_files[self.ccd]
             pickle.dump(stack_wavcal_array, open(stack_wavcal_array_file,'wb'))
 
             stack_array=[]
             for j in range(0,len(stack0[0])):
                 stack_array.append(m2fs.get_stack(stack0,j))
-            stack_array_file = self.stack_array_files[self.ccd]
             pickle.dump(stack_array, open(stack_array_file,'wb'))#save pickle to file
 
-    def writefits(self):
+    def stack_frames(self):
+        self._stack_frames('skycorr')
+        self._stack_frames('raw')
+    
+    def _writefits(self, kind='sky'):
         '''Function to write the results in fits files.
         I choose to name the files based on the frame, color utdate.'''
         # if (('twilight' not in field_name[i])&('standard' not in field_name[i])):
@@ -1503,8 +1582,12 @@ class ReduceM2FS:
                                                                             self.lco, self.use_flat,
                                                                             self.hires_exptime, 
                                                                             self.id_lines_array_files)
-        stack_array_file = self.stack_array_files[self.ccd]
-        stack_wavcal_array_file = self.stack_wavcal_array_files[self.ccd]
+        if 'sky' in kind:
+            stack_array_file = self.stack_array_files[self.ccd]
+            stack_wavcal_array_file = self.stack_wavcal_array_files[self.ccd]
+        if 'raw' in kind:
+            stack_array_file = self.stack_array_files_nosky[self.ccd]
+            stack_wavcal_array_file = self.stack_wavcal_array_files_nosky[self.ccd]
         # stack_array_file=root2+'_stack_array.pickle'
         # stack_wavcal_array_file=root2+'_stack_wavcal_array.pickle'
         stack_array=pickle.load(open(stack_array_file,'rb'))
@@ -1523,7 +1606,10 @@ class ReduceM2FS:
             # data_file=root0+'_stitched.fits'
             data_file = self.filedict[(self.ccd, file_id)]
             wavcal_array_file = self.wavcal_array_files[(self.ccd, file_id)]
-            skysubtract_array_file = self.skysubtract_array_files[(self.ccd, file_id)]
+            if 'sky' in kind:
+                skysubtract_array_file = self.skysubtract_array_files[(self.ccd, file_id)]
+            if 'raw' in kind:
+                skysubtract_array_file = self.extract1d_array_files[(self.ccd, file_id)]
             sky_array_file = self.sky_array_files[(self.ccd, file_id)]
             plugmap_file = self.plugmap_file
             #
@@ -1556,7 +1642,10 @@ class ReduceM2FS:
                 new_hdul[0].header['weighted_mjd']=str(wavcal_array[0].mjd)
                 # print('writing individual frame .fits for: \n'+root0)
 #                    hjdstring=str(round(new_hdul[5].data['hjd'][0],2))
-                fits_file = self.fits_files[(self.utdate, self.ccd, file_id)]
+                if 'sky' in kind:
+                    fits_file = self.fits_files[(self.utdate, self.ccd, file_id)]
+                if 'raw' in kind:
+                    fits_file = self.extract1d_fits_files[(self.utdate, self.ccd, file_id)]
                 # fits_file=root0+'_'+new_hdul[0].header['ut-date']+'_'+new_hdul[0].header['ut-time']+'_skysubtract.fits'
                 new_hdul.writeto(fits_file,overwrite=True)
 
@@ -1568,7 +1657,10 @@ class ReduceM2FS:
 #                hjdstring=str(round(new_hdul[5].data['hjd'][0],2))
         # stack_fits_file=root2+'_'+new_hdul[0].header['ut-date']+'_'+new_hdul[0].header['ut-time']+'_stackskysub.fits'
         # stack_fits_file2=root2+'_'+new_hdul[0].header['ut-date']+'_'+new_hdul[0].header['ut-time']+'_stackskysub_file'
-        stack_fits_file = self.fits_stack[(self.utdate, self.ccd)]
+        if 'sky' in kind:
+            stack_fits_file = self.fits_stack[(self.utdate, self.ccd)]
+        if 'raw' in kind:
+            stack_fits_file = self.extract1d_fits_stack[(self.utdate, self.ccd)]
         # g0=open(stack_fits_file2,'w')
         # g0.write(stack_fits_file+' '+obj[i]+' \n')
         # g0.close()
@@ -1609,3 +1701,6 @@ class ReduceM2FS:
                 np.pause()
             new_hdul.writeto(stack_fits_file,overwrite=True)
 
+    def writefits(self):
+        self._writefits('sky')
+        self._writefits('raw')
