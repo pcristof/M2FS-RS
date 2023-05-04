@@ -2375,3 +2375,154 @@ def get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap,m2fsrun,field
     new_hdul.append(fits.BinTableHDU(table_hdu,name='bin_table'))
     new_hdul.append(fits.ImageHDU(sky,name='mean_sky'))
     return new_hdul
+
+def get_aperture_fast(j,columnspec_array,apertures_profile_middle,middle_column,trace_order,trace_rejection_sigma,trace_rejection_iterations,image_boundary,trace_shift_max,trace_nlost_max,profile_rejection_iterations,profile_nsample,profile_order,window):
+    import matplotlib
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from specutils import SpectralRegion
+    import astropy.units as u
+    from astropy.modeling import models,fitting
+    from astropy.modeling import models
+    from specutils.spectra import Spectrum1D
+
+    trace_x,trace_y,trace_z=m2fs.get_trace_xyz(j,columnspec_array,apertures_profile_middle,middle_column,trace_shift_max,trace_nlost_max)
+    trace_func_init=models.Polynomial1D(degree=trace_order)
+    fitter=fitting.LinearLSQFitter()
+    y=np.ma.masked_array(trace_y,mask=False)
+    z=np.ma.masked_array(trace_z,mask=False)
+    sig_y=trace_y#fudge for now, not used for anything
+
+    trace_pix_min=[]
+    trace_pix_max=[]
+    for i in range(0,len(trace_x)):
+        trace_pix_min.append(np.interp(x=trace_y[i],xp=[image_boundary.lower[q][1] for q in range(0,len(image_boundary.lower))],fp=[image_boundary.lower[q][0] for q in range(0,len(image_boundary.lower))]))
+        trace_pix_max.append(np.interp(x=trace_y[i],xp=[image_boundary.upper[q][1] for q in range(0,len(image_boundary.upper))],fp=[image_boundary.upper[q][0] for q in range(0,len(image_boundary.upper))]))
+    trace_pix_min=np.array(trace_pix_min)
+    trace_pix_max=np.array(trace_pix_max)
+
+    y.mask[trace_x<trace_pix_min]=True
+    y.mask[trace_x>trace_pix_max]=True
+    z.mask[trace_x<trace_pix_min]=True
+    z.mask[trace_x>trace_pix_max]=True
+
+    trace_func=trace_func_init
+    trace_rms=np.sqrt(np.mean((y-trace_func(trace_x))**2))
+
+    for q in range(0,trace_rejection_iterations):
+        use=np.where(y.mask==False)[0]
+        if len(use)>=3:
+            trace_func=fitter(trace_func_init,trace_x[use],trace_y[use])
+            trace_rms=np.sqrt(np.mean((y[use]-trace_func(trace_x)[use])**2))
+            outlier=np.where(np.abs(trace_y-trace_func(trace_x))>trace_rejection_sigma*trace_rms)[0]
+            y.mask[outlier]=True
+    use=np.where(y.mask==False)[0]
+    trace_npoints=len(use)
+
+    order=[trace_order]
+    rejection_sigma=[trace_rejection_sigma]
+#    pix_min=[trace_pix_min]
+#    pix_max=[trace_pix_max]
+    func=[trace_func]
+    rms=[trace_rms]
+    npoints=[trace_npoints]
+    if len(trace_x[y.mask==False])>0:
+        pix_min=[np.min(trace_x[y.mask==False])]
+        pix_max=[np.max(trace_x[y.mask==False])]
+    else:
+        pix_min=[np.float(-999.)]
+        pix_max=[np.float(-999.)]
+
+
+    print(j,trace_npoints,pix_min,pix_max)
+
+#    fig=plt.figure(1)
+#    ax1,ax2=plot_trace(j,trace_x,trace_y,trace_z,y,trace_func,np.median(trace_pix_min),np.median(trace_pix_max),trace_rms,trace_npoints,trace_order,fig)
+
+#    print('press \'d\' to delete point nearest cursor')
+#    print('press \'c\' to un-delete deleted point nearest cursor')
+#    print('press \'l\' to re-set lower limit of fit region')
+#    print('press \'u\' to re-set lower limit of fit region')
+#    print('press \'i\' to iterate outlier rejection')
+#    print('press \'r\' to change rejection sigma threshold')
+#    print('press \'o\' to change order of fit')
+#    print('press \'z\' to return to original and erase edits')
+#    cid=fig.canvas.mpl_connect('key_press_event',lambda event: on_key_trace(event,[j,trace_x,trace_y,trace_z,y,sig_y,pix_min,pix_max,func,rms,npoints,order,rejection_sigma,trace_rejection_iterations,trace_func_init,fig]))
+#    plt.show()
+#    plt.close()
+
+    if len(trace_x[y.mask==False])>0:
+        pix_min.append(np.min(trace_x[y.mask==False]))
+        pix_max.append(np.max(trace_x[y.mask==False]))
+    else:
+        pix_min.append(np.float(-999.))
+        pix_max.append(np.float(-999.))
+    profile_init=models.Polynomial1D(degree=profile_order)
+    profile_fitter=fitting.LinearLSQFitter()
+
+    x=np.array([np.median(columnspec_array[k].columns) for k in range(0,len(columnspec_array))])
+    if apertures_profile_middle.realvirtual[j]:#if this is a real aperture, fit line profile as function of pixel
+        y1=[]
+        y2=[]
+        for i in range(0,len(x)):#re-fit Gaussian profile at different x values along spectral axis
+            center=func[len(func)-1](x[i])
+            if((center>0.)&(center<np.max(columnspec_array[i].pixel.value))):#make sure the trace function y(x) makes sense at this x
+                spec1d=Spectrum1D(spectral_axis=columnspec_array[i].pixel,flux=columnspec_array[i].spec*u.electron,uncertainty=columnspec_array[i].err,mask=columnspec_array[i].mask)
+                subregion0,g_fit0=fit_aperture(spec1d-columnspec_array[i].continuum(columnspec_array[i].pixel.value),window,center)
+                ## PIC: Instead of refitting the entire thing all the time, I assume that the width is fixed 
+                ## (estimated from the middle profile.)
+                ## There "all" we need to update is the maximum position and value
+                peak_finder((spec1d-columnspec_array[i].continuum(columnspec_array[i].pixel.value)).data)
+                y1.append(g_fit0.stddev.value)
+                y2.append(g_fit0.amplitude.value)
+            else:#otherwise give a place-holder value and mask it below
+                y1.append(np.float(-999.))
+                y2.append(np.float(-999.))
+        y1=np.array(y1)
+        y2=np.array(y2)
+        sigma_y=np.ma.masked_array(y1,mask=False)
+        sigma_y.mask[y1<-998.]=True
+        sigma_y.mask[x<pix_min[len(pix_min)-1]]=True
+        sigma_y.mask[x>pix_max[len(pix_max)-1]]=True
+        amplitude_y=np.ma.masked_array(y2,mask=False)
+        amplitude_y.mask[y2<-998.]=True
+        amplitude_y.mask[x<pix_min[len(pix_min)-1]]=True
+        amplitude_y.mask[x>pix_max[len(pix_max)-1]]=True
+
+        profile_sigma=profile_init
+        profile_sigma_rms=np.sqrt(np.mean((y[use]-profile_sigma(x[use]))**2))
+        profile_amplitude=profile_init
+        profile_amplitude_rms=np.sqrt(np.mean((y[use]-profile_amplitude(x[use]))**2))
+        for q in range(0,profile_rejection_iterations):
+            use=np.where((sigma_y.mask==False)&(amplitude_y.mask==False))[0]
+            if len(use)>3.:
+                profile_sigma=profile_fitter(profile_init,x[use],sigma_y[use])
+                profile_sigma_rms=np.sqrt(np.mean((sigma_y[use]-profile_sigma(x[use]))**2))
+                profile_amplitude=profile_fitter(profile_init,x[use],amplitude_y[use])
+                profile_amplitude_rms=np.sqrt(np.mean((amplitude_y[use]-profile_amplitude(x[use]))**2))
+                outlier1=(np.where(np.abs(sigma_y-profile_sigma(x))>3.*profile_sigma_rms))[0]#reject outliers
+                outlier2=(np.where(np.abs(amplitude_y-profile_amplitude(x))>3.*profile_amplitude_rms))[0]#reject outliers
+                sigma_y.mask[outlier1]=True
+                amplitude_y.mask[outlier2]=True
+        use=np.where((sigma_y.mask==False)&(amplitude_y.mask==False))[0]
+        profile_npoints=len(use)
+
+#        print(profile_sigma_rms/np.median(sigma_y[sigma_y.mask==False]),profile_amplitude_rms/np.median(amplitude_y[amplitude_y.mask==False]))
+#        plt.scatter(x,amplitude_y,s=3,color='k')
+#        plt.scatter(x[amplitude_y.mask==True],amplitude_y[amplitude_y.mask==True],s=13,marker='x',color='y')
+#        plt.plot(x,profile_amplitude(x),color='r')
+#        plt.axvline(x=pix_min[len(pix_min)-1],lw=0.3,linestyle=':',color='k')
+#        plt.axvline(x=pix_max[len(pix_max)-1],lw=0.3,linestyle=':',color='k')
+##        plt.ylim([1,3])
+#        plt.xlabel('x [pixel]')
+#        plt.ylabel('LSF sigma [pixel]')
+#        plt.show()
+#        plt.close()
+    else:
+        profile_sigma=-999
+        profile_sigma_rms=-999
+        profile_amplitude=-999
+        profile_amplitude_rms=-999
+        profile_npoints=-999
+    aperture0=aperture(trace_aperture=j+1,trace_func=func[len(func)-1],trace_rms=rms[len(rms)-1],trace_npoints=npoints[len(npoints)-1],trace_pixel_min=pix_min[len(pix_min)-1],trace_pixel_max=pix_max[len(pix_max)-1],profile_sigma=profile_sigma,profile_sigma_rms=profile_sigma_rms,profile_amplitude=profile_amplitude,profile_amplitude_rms=profile_amplitude_rms,profile_npoints=profile_npoints)
+    return aperture0
