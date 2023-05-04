@@ -2169,3 +2169,209 @@ def get_aperture_profile_fast(apertures_initial,spec1d,continuum,window):
         realvirtual.append(True)
         initial.append(True)
     return m2fs.aperture_profile(g_fit,subregion,realvirtual,initial)
+
+
+def get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap,m2fsrun,field_name,thar,temperature,aperture_array,linelist):
+    import numpy as np
+
+    from astropy.io import fits
+    from astropy import time, coordinates as coord, units as u
+    from astropy.time import Time
+    from astropy.coordinates import SkyCoord, EarthLocation
+    import astropy.units as u
+    from copy import deepcopy
+
+    data_array=[]
+    var_array=[]
+    mask_array=[]
+    sky=[]
+    wav_array=[]
+    mjd_array=[]
+    hjd_array=[]
+    vheliocorr_array=[]
+    snratio_array=[]
+    thar_npoints_array=[]
+    thar_rms_array=[]
+    thar_resolution_array=[]
+    thar_wav_min_array=[]
+    thar_wav_max_array=[]
+    temperature_array=[]
+    row_array=[]
+
+    temperature0=[]
+    for i in range(0,len(temperature)):
+        temperature0.append(float(temperature[i]))
+
+    for i in range(0,len(plugmap)):
+        temperature_array.append(temperature0)
+        thar_npoints=[]
+        thar_rms=[]
+        thar_resolution=[]
+        thar_wav_min=[]
+        thar_wav_max=[]
+        for j in range(0,len(thar)):
+            this=np.where([thar[j][q].aperture for q in range(0,len(thar[j]))]==plugmap['aperture'][i])[0]
+            if len(this)>0:
+                thar_npoints.append(thar[j][this[0]].npoints)
+                thar_rms.append(thar[j][this[0]].rms)
+                thar_resolution0=np.float(-999.)
+                thar_wav_min0=np.float(-999.)
+                thar_wav_max0=np.float(-999.)
+                if len(thar[j][this[0]].wav)>1:
+                    keep=np.where(thar[j][this[0]].wav.mask==False)[0]
+                    if len(keep)>1:
+                        dwav=np.max(thar[j][this[0]].wav[keep])-np.min(thar[j][this[0]].wav[keep])
+                        dpix=np.max([thar[j][this[0]].fit_lines.fit[q].mean.value for q in keep])-np.min([thar[j][this[0]].fit_lines.fit[q].mean.value for q in keep])
+                        central_wavelength=np.min(linelist.wavelength)+(np.max(linelist.wavelength)-np.min(linelist.wavelength))/2.
+#                        x=[thar[j][this[0]].fit_lines.fit[q].mean.value for q in keep]
+                        thar_resolution0=thar[j][this[0]].resolution(np.interp(x=central_wavelength,xp=[thar[j][this[0]].wav[q] for q in keep],fp=[thar[j][this[0]].fit_lines.fit[q].mean.value for q in keep]))*dwav/dpix
+                        thar_wav_min0=np.min(np.ma.compressed(thar[j][this[0]].wav))
+                        thar_wav_max0=np.max(np.ma.compressed(thar[j][this[0]].wav))
+
+                thar_resolution.append(thar_resolution0)
+                thar_wav_min.append(thar_wav_min0)
+                thar_wav_max.append(thar_wav_max0)
+
+        thar_npoints_array.append(thar_npoints)
+        thar_rms_array.append(thar_rms)
+        thar_resolution_array.append(thar_resolution)
+        thar_wav_min_array.append(thar_wav_min)
+        thar_wav_max_array.append(thar_wav_max)
+
+        if plugmap['objtype'][i]=='TARGET':
+            # coords=coord.SkyCoord(plugmap['ra'][i],plugmap['dec'][i],unit=(u.deg,u.deg),frame='icrs')
+            # lco=coord.EarthLocation.from_geodetic(lon=-70.6919444*u.degree,lat=-29.0158333*u.degree,height=2380.*u.meter)
+            # times=time.Time(wavcal_array[0].mjd,format='mjd',location=lco)
+            # light_travel_time_helio=times.light_travel_time(coords,'heliocentric')
+            mjd_array.append(wavcal_array[0].mjd)
+            # hjd_array.append((Time(wavcal_array[0].mjd,format='mjd').jd+light_travel_time_helio).value)
+            hjd_array.append(wavcal_array[0].mjd+2400000.)
+            # vheliocorr_array.append((coords.radial_velocity_correction('heliocentric',obstime=times).to(u.km/u.s)).value)
+            vheliocorr_array.append(0.)
+        else:
+            mjd_array.append(wavcal_array[0].mjd)
+            hjd_array.append(wavcal_array[0].mjd+2400000.)
+            vheliocorr_array.append(0.)
+        this=np.where([skysubtract_array[q].aperture for q in range(0,len(skysubtract_array))]==plugmap['aperture'][i])[0][0]
+        snratio_array.append(np.median(skysubtract_array[this].spec1d_flux.value[skysubtract_array[this].spec1d_mask==False]/skysubtract_array[this].spec1d_uncertainty.quantity.value[skysubtract_array[this].spec1d_mask==False]))
+        this=np.where([aperture_array[q].trace_aperture for q in range(0,len(aperture_array))]==plugmap['aperture'][i])[0][0]
+        row=aperture_array[this].trace_func(np.float(len(data.data[0])/2.))
+        row_array.append(row)
+    snratio_array=np.array(snratio_array)
+    m2fsrun_array=np.full(len(snratio_array),m2fsrun,dtype='a100')
+    field_name_array=np.full(len(snratio_array),field_name,dtype='a100')
+    thar_npoints_array=np.array(thar_npoints_array,dtype=np.object_)
+    thar_rms_array=np.array(thar_rms_array,dtype=np.object_)
+    thar_resolution_array=np.array(thar_resolution_array,dtype=np.object_)
+    thar_wav_min_array=np.array(thar_wav_min_array,dtype=np.object_)
+    thar_wav_max_array=np.array(thar_wav_max_array,dtype=np.object_)
+    temperature_array=np.array(temperature_array,dtype=np.object_)
+    row_array=np.array(row_array)
+
+    cols=fits.ColDefs([
+                    #    fits.Column(name='EXPID',format='A100',array=plugmap['expid']),
+                       fits.Column(name='OBJTYPE',format='A6',array=plugmap['objtype']),
+                    #    fits.Column(name='RA',format='D',array=plugmap['ra']),
+                    #    fits.Column(name='DEC',format='D',array=plugmap['dec']),
+                       fits.Column(name='APERTURE',format='I',array=plugmap['aperture']),
+                    #    fits.Column(name='RMAG',format='D',array=plugmap['rmag']),
+                    #    fits.Column(name='RAPMAG',format='D',array=plugmap['rapmag']),
+                    #    fits.Column(name='ICODE',format='D',array=plugmap['icode']),
+                    #    fits.Column(name='RCODE',format='D',array=plugmap['rcode']),
+                    #    fits.Column(name='BCODE',format='A6',array=plugmap['bcode']),
+                    #    fits.Column(name='MAG',format='5D',array=plugmap['mag']),
+                    #    fits.Column(name='XFOCAL',format='D',array=plugmap['xfocal']),
+                    #    fits.Column(name='YFOCAL',format='D',array=plugmap['yfocal']),
+                    #    fits.Column(name='FRAMES',format='B',array=plugmap['frames']),
+                    #    fits.Column(name='CHANNEL',format='A100',array=plugmap['channel']),
+                    #    fits.Column(name='RESOLUTION',format='A100',array=plugmap['resolution']),
+                    #    fits.Column(name='FILTER',format='A100',array=plugmap['filter']),
+                    #    fits.Column(name='CHANNEL_CASSETTE_FIBER',format='A100',array=plugmap['channel_cassette_fiber']),
+                       fits.Column(name='MJD',format='D',array=mjd_array),
+                       fits.Column(name='HJD',format='D',array=hjd_array),
+                       fits.Column(name='vheliocorr',format='d',array=vheliocorr_array),
+                       fits.Column(name='SNRATIO',format='d',array=snratio_array),
+                       fits.Column(name='run_id',format='A100',array=m2fsrun_array),
+                       fits.Column(name='field_name',format='A100',array=field_name_array),
+                       fits.Column(name='wav_npoints',format='PI()',array=thar_npoints_array),
+                       fits.Column(name='wav_rms',format='PD()',array=thar_rms_array),
+                       fits.Column(name='wav_resolution',format='PD()',array=thar_resolution_array),
+                       fits.Column(name='wav_min',format='PD()',array=thar_wav_min_array),
+                       fits.Column(name='wav_max',format='PD()',array=thar_wav_max_array),
+                       fits.Column(name='row',format='D',array=row_array),
+                       fits.Column(name='temperature',format='PD()',array=temperature_array)])
+    table_hdu=fits.FITS_rec.from_columns(cols)
+
+    if len(skysubtract_array)>0:
+        for i in range(0,len(plugmap)):
+            this=np.where(np.array([skysubtract_array[q].aperture for q in range(0,len(skysubtract_array))])==plugmap['aperture'][i])[0]
+            if len(this)>0:
+                mask0=deepcopy(skysubtract_array[this[0]].spec1d_mask)
+                if len(np.where(skysubtract_array[this[0]].spec1d_mask==False)[0])>0:#mask pixels outside valid extrapolation region of wavelength solution
+                    best=np.where(thar_npoints_array[i]==np.max(thar_npoints_array[i]))[0]
+                    spec_range=thar_wav_max_array[i][best]-thar_wav_min_array[i][best]
+                    best2=np.where(spec_range==np.min(spec_range))[0][0]
+                    if thar_npoints_array[i][best[best2]]==0:
+                        print(thar_npoints_array[i],this,wavcal_array[this[0]].wav)
+                        np.pause()
+#                    if thar_npoints_array[i][best[best2]]>0:###why are there unmasked cases where thar_npoints=0 and/or wavcal.wav=[]
+#                        if len(wavcal_array[this[0]].wav)>0:
+                    extra=(thar_wav_max_array[i][best[best2]]-thar_wav_min_array[i][best[best2]])/np.float(thar_npoints_array[i][best[best2]])
+                    lambdamin=thar_wav_min_array[i][best[best2]]-extra
+                    lambdamax=thar_wav_max_array[i][best[best2]]+extra
+#                            print(wavcal_array[this[0]].wav)
+                    try:
+                        new_mask=np.where((wavcal_array[this[0]].wav<lambdamin)|(wavcal_array[this[0]].wav>lambdamax))[0]
+                    except:
+                        new_mask = np.arange(len(mask0))
+                    mask0[new_mask]=True
+                data_array.append(skysubtract_array[this[0]].spec1d_flux.value)
+                var_array.append(skysubtract_array[this[0]].spec1d_uncertainty.quantity.value**2)
+                mask_array.append(mask0)
+                sky.append(sky_array[this[0]].spec1d_flux)
+                if len(wavcal_array[this[0]].wav)>0:
+                    wav_array.append(wavcal_array[this[0]].wav)
+                else:
+                    wav_array.append(np.full(len(skysubtract_array[0].spec1d_pixel),0.,dtype=float))
+            else:
+                data_array.append(np.full(len(skysubtract_array[0].spec1d_pixel),0.,dtype=float))
+                var_array.append(np.full(len(skysubtract_array[0].spec1d_pixel),1.e+30,dtype=float))
+                mask_array.append(np.full(len(skysubtract_array[0].spec1d_pixel),True,dtype=bool))
+                sky.append(np.full(len(skysubtract_array[0].spec1d_pixel),0.,dtype=float))
+                wav_array.append(np.full(len(skysubtract_array[0].spec1d_pixel),0.,dtype=float))
+
+        var_array=np.array(var_array)
+        mask_array=np.array(mask_array)
+        data_array=np.array(data_array)
+        sky=np.array(sky)
+        wav_array=np.array(wav_array)
+
+        ivar=1./var_array
+        mask_or=np.zeros((len(mask_array),len(mask_array[0])),dtype=int)
+        for xxx in range(0,len(mask_or)):
+            for yyy in range(0,len(mask_or[xxx])):
+                if mask_array[xxx][yyy]:
+                    mask_or[xxx][yyy]=1
+        mask_and=mask_or
+                        
+        if len(plugmap)!=len(skysubtract_array):
+            print('error - plugmap has different length than data array!!!')
+            print(len(plugmap),' vs',len(skysubtract_array))
+            np.pause()
+    else:
+        wav_array=np.full(0,0.)
+        data_array=np.full(0,0.)
+        ivar=np.full(0,0.)
+        mask_and=np.full(0,1)
+        mask_or=np.full(0,1)
+        sky=np.full(0,0.)
+
+    primary_hdu=fits.PrimaryHDU(wav_array,header=data.header)
+    new_hdul=fits.HDUList([primary_hdu])
+    new_hdul.append(fits.ImageHDU(data_array,name='sky_subtracted'))
+    new_hdul.append(fits.ImageHDU(ivar,name='inverse_variance'))
+    new_hdul.append(fits.ImageHDU(mask_and,name='mask_and'))
+    new_hdul.append(fits.ImageHDU(mask_or,name='mask_or'))
+    new_hdul.append(fits.BinTableHDU(table_hdu,name='bin_table'))
+    new_hdul.append(fits.ImageHDU(sky,name='mean_sky'))
+    return new_hdul

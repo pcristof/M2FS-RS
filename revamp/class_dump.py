@@ -1651,7 +1651,7 @@ class ReduceM2FS:
             plugmap0=pickle.load(open(plugmap_file,'rb'))
             m2fsrun = 'dummy'
             field_name = "dummy"
-            new_hdul=m2fs.get_hdul(data,skysubtract_array,sky_array,wavcal_array,
+            new_hdul=fdump.get_hdul(data,skysubtract_array,sky_array,wavcal_array,
                                   plugmap0,m2fsrun,field_name,thar,
                                   [temperature[len(temperature)-1]],
                                   aperture_array, linelist)
