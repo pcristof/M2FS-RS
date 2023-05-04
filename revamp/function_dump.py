@@ -2083,3 +2083,89 @@ def fit_aperture(spec,window,x_center):
     g_init=models.Gaussian1D(amplitude=rough.amplitude.value*u.electron,mean=rough.mean.value*u.AA,stddev=rough.stddev.value*u.AA)#now do a fit using rough estimate as first guess
     g_fit0=fit_lines(sub_spectrum,g_init)#now do a fit using rough estimate as first guess
     return subregion0,g_fit0
+
+def get_columnspec(data,trace_step,n_lines,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order,threshold_factor,window):
+    import numpy as np
+    import astropy.units as u
+    from specutils.fitting import find_lines_threshold
+    from specutils.fitting import find_lines_derivative
+
+    n_cols=np.shape(data)[1]
+    trace_n=np.long(n_cols/trace_step)
+#    print(n_cols,trace_n)
+    trace_cols=np.linspace(0,n_cols,trace_n,dtype='int')
+
+#    apertures_initial=[]
+#    col=[]
+#    spec1d=[]
+#    continuum=[]
+#    rms=[]
+#    pixel=[]
+#    apertures_profile=[]
+    columnspec_array=[]
+    for i in range(0,len(trace_cols)-1):
+        print('working on '+str(i+1)+' of '+str(len(trace_cols))+' trace columns')
+        col0=np.arange(n_lines)+trace_cols[i]
+        spec1d0=m2fs.column_stack(data,col0)
+#        np.pause()
+        continuum0,rms0=get_continuum(spec1d0,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order)
+        pixel0=(np.arange(len(spec1d0.data),dtype='float'))*u.AA#unit is pixels, but specutils apparently can't handle that, so we lie and say Angs.
+        spec_contsub=spec1d0-continuum0(pixel0.value)
+        spec_contsub.uncertainty.quantity.value[:]=rms0
+#        spec_contsub.mask[:]=False
+        apertures_initial0=find_lines_derivative(spec_contsub,flux_threshold=threshold_factor*rms0)#find peaks in continuum-subtracted "spectrum"
+#        apertures_profile0=get_aperture_profile(spec1d0,window)
+
+        apertures_profile0=get_aperture_profile_fast(apertures_initial0,spec1d0,continuum0,window)
+        columnspec0=m2fs.columnspec(columns=col0,spec=spec1d0.data,mask=spec1d0.mask,err=spec1d0.uncertainty,pixel=pixel0,continuum=continuum0,rms=rms0,apertures_initial=apertures_initial0,apertures_profile=apertures_profile0)#have to break up spec1d into individual data/mask/uncertainty fields in order to allow pickling of columnspec_array
+#        columnspec0=columnspec(columns=col0,spec=spec1d0,mask=spec1d0.mask,err=spec1d0.uncertainty,pixel=pixel0,continuum=continuum0,rms=rms0,apertures_initial=apertures_initial0,apertures_profile=apertures_profile0)#have to break up spec1d into individual data/mask/uncertainty fields in order to allow pickling of columnspec_array
+#        columnspec0.apertures_profile=apertures_profile0
+        print('found '+str(len(apertures_initial0))+' apertures in column '+str(col0))
+#        col.append(col0)
+#        spec1d.append(spec1d0)
+#        continuum.append(continuum0)
+#        rms.append(rms0)
+#        pixel.append(pixel0)
+#        apertures_initial.append(apertures_initial0[apertures_initial0['line_type']=='emission'])#keep only emission lines
+        columnspec_array.append(columnspec0)
+        print('Working for column {} / {}'.format(i, len(trace_cols)))
+#    return columnspec(columns=col,spec1d=spec1d,pixel=pixel,continuum=continuum,rms=rms,apertures_initial=apertures_initial,apertures_profile)
+    return columnspec_array
+
+def get_aperture_profile_fast(apertures_initial,spec1d,continuum,window):
+    import numpy as np
+    import astropy.units as u
+    from specutils import SpectralRegion
+    from astropy.modeling import models,fitting
+
+    subregion=[]
+    g_fit=[]
+    realvirtual=[]#1 for real aperture, 0 for virtual aperture (ie a placeholder aperture for bad/unplugged fiber etc.)
+    initial=[]#1 for apertures identified automatically, 0 for those identified by hand
+
+    # from IPython import embed
+    # embed()
+
+    # a = spec1d-continuum(spec1d.spectral_axis.value)
+
+    # import matplotlib.pyplot as plt
+    # plt.figure()
+    # plt.plot(a.data)
+    # for j in range(len(apertures_initial['line_center'])):
+    #     deriv = apertures_initial['line_center'][j].value
+    #     plt.axvline(deriv)
+    # plt.show()
+
+    for j in range(0,len(apertures_initial)):
+        x_center=apertures_initial['line_center'][j].value
+        spectrum = spec1d-continuum(spec1d.spectral_axis.value)
+        # subregion0,g_fit0=fit_aperture(spec1d-continuum(spec1d.spectral_axis.value),window,x_center)
+        val1=x_center-window/2.#window for fitting aperture
+        val2=x_center+window/2.#window for fitting aperture
+        subregion0=SpectralRegion(val1*u.AA,val2*u.AA)#define extraction region from window
+        g_fit0=models.Gaussian1D(amplitude=spectrum.data[int(x_center)]*u.electron,mean=x_center*u.AA,stddev=0.1*x_center*u.AA)#now do a fit using rough estimate as first guess        
+        subregion.append(subregion0)
+        g_fit.append(g_fit0)
+        realvirtual.append(True)
+        initial.append(True)
+    return m2fs.aperture_profile(g_fit,subregion,realvirtual,initial)

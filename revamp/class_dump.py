@@ -552,7 +552,7 @@ class ReduceM2FS:
             data_file = self.filedict[(self.ccd, led_id)]
             data=astropy.nddata.CCDData.read(data_file)
             #
-            columnspec_array = m2fs.get_columnspec(data, self.trace_step, self.n_lines, 
+            columnspec_array = fdump.get_columnspec(data, self.trace_step, self.n_lines, 
                                                 self.columnspec_continuum_rejection_low,
                                                 self.columnspec_continuum_rejection_high,
                                                 self.columnspec_continuum_rejection_iterations,
