@@ -66,9 +66,11 @@ class ReduceM2FS:
         self.columnspec_array = []
         self.throughputcorr_bool = False ## Indicator for whether data was throughput correted.
         self.crreject_bool = False
+        self.flat_field_bool = False
+        self.normalize_sky = False
         
         ## Let us define some of the fundamental variables for the analysis
-        self.trace_step = 20 # Nb columns combined when scanning across rows to identify apertures 
+        self.trace_step = 20 # Nb columns combined when scanning across rows to identify apertures [default was 20]
         self.n_lines = self.trace_step # tracing steps - Always the same?
         self.columnspec_continuum_rejection_low = -5. # Low limit rejection of points?
         self.columnspec_continuum_rejection_high = 1. # Higher limit?
@@ -80,7 +82,9 @@ class ReduceM2FS:
         self.trace_order = 4 ## Order used to trace
         self.trace_rejection_sigma = 3. # largest rms deviation to accept in fit to aperture trace
         self.trace_rejection_iterations = 10
-        self.trace_shift_max = 1.5 # Can be too restrictive?
+        self.trace_shift_max = 5. # PIC: Can be too restrictive? 
+                                    # And what is that for anyway? Are we really afraid to fall
+                                    # onto the next aperture if it's too large? 
         self.trace_nlost_max = 2.
         self.profile_rejection_iterations = 10
         self.profile_nsample = 50 #number of points along spectral- (x-) axis at which to measure profile amplitude and sigma before performing fit of amplitude(x) and sigma(x)
@@ -92,13 +96,13 @@ class ReduceM2FS:
         self.resolution_order = 1
         self.resolution_rejection_iteration = 10
         self.id_lines_continuum_rejection_sigma = 3.
-        self.id_lines_tol_angs = 0.1 # 0.05 # tolerance for finding new lines to add from linelist (Angstroms)
+        self.id_lines_tol_angs = 0.05 # 0.005 # tolerance for finding new lines to add from linelist (Angstroms)
         self.resolution_rejection_iterations = 10
         self.id_lines_continuum_rejection_low = -5.
         self.id_lines_continuum_rejection_high = 1.
         self.id_lines_continuum_rejection_iterations = 10 #number of iterations of outlier rejection for fitting "continuum"
         self.id_lines_continuum_rejection_order = 10
-        self.id_lines_threshold_factor = 10
+        self.id_lines_threshold_factor = 100 # default was 10. Threshold to id lines based on continuum?
         self.id_lines_window = 5.
         self.id_lines_order = 5
         self.id_lines_tol_pix = 2. #tolerance for matching lines between template and new spectrum (pixels)
@@ -265,6 +269,7 @@ class ReduceM2FS:
         self.apflatcorr_files = {}
         self.scatteredlightcorr_files = {}
         self.extract1d_array_files = {}
+        self.extract1d_flatfield_array_files = {}
         self.wavcal_array_files = {}
         for ccd in ['r', 'b']:    
             for file_id in self.all_list:
@@ -274,6 +279,8 @@ class ReduceM2FS:
                         + "{}{:04d}-scatteredlightcorr.pickle".format(ccd, file_id)
                 self.extract1d_array_files[(ccd, file_id)] =  self.outpath \
                     + "{}{:04d}-extract1d-array.pickle".format(ccd, file_id)
+                self.extract1d_flatfield_array_files[(ccd, file_id)] = self.outpath \
+                        + "{}{:04d}-extract1d-flatfield-array.pickle".format(ccd, file_id)
                 self.wavcal_array_files[(ccd, file_id)] = self.outpath \
                     + "{}{:04d}-wavcal-array.pickle".format(ccd, file_id)
 
@@ -348,6 +355,8 @@ class ReduceM2FS:
                     + "{}-{}-results-skysubtract.fits".format(self.utdate, ccd)
             self.extract1d_fits_stack[(self.utdate, ccd)] = self.outpath \
                     + "{}-{}-results.fits".format(self.utdate, ccd)
+        ## Now generate some files meant to accelerate the program
+        self.idlinestemplate_datafile = self.outpath + 'tmp-idlinesdatafile.pickle'
 
     ########################################
     #### PRE REDUCTION (FRAME STICHING) ####
@@ -404,6 +413,11 @@ class ReduceM2FS:
 
         objtype = np.array(objtype)[::-1]
         identifiers = np.array(identifiers)[::-1]
+        nobjtype = np.copy(objtype)
+        for i in range(1, len(objtype)):
+            if (objtype[i]=='unused') & (objtype[i-1]!='unused'):
+                nobjtype[i] = objtype[i-1]
+        objtype = nobjtype
         objcol = fits.Column(name='OBJTYPE',format='A6',array=objtype)
         apcol = fits.Column(name='APERTURE',format='I',array=np.arange(nbfibers)+1)
         cols=fits.ColDefs([objcol, apcol])
@@ -480,9 +494,9 @@ class ReduceM2FS:
         #     pickle.dump(image_boundary,open(image_boundary_file,'wb'))#save pickle to file
         
         ## Let's hardcode some boundaries:
-        x1 = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        x1 = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) + 10
         x2 = np.array([2048, 2048, 2048, 2048, 2048, 
-                       2048, 2048, 2048, 2048, 2048])
+                       2048, 2048, 2048, 2048, 2048]) - 10
         y1 = np.array([0, 250, 500, 750, 1000, 
                        1250, 1520, 1780, 2056, 2056])
         y2 = np.array([0, 51,  290, 360, 790, 
@@ -571,7 +585,7 @@ class ReduceM2FS:
         # from IPython import embed
         # embed()
         realvirtualarray = np.array(apertures_profile_middle.realvirtual)
-        f = open(self.tmppath + 'real-virtual-array.txt', 'w')
+        f = open(self.outpath + 'real-virtual-array.txt', 'w')
         for i in range(len(realvirtualarray)):
             f.write("{}\n".format(int(float(realvirtualarray[i]))))
         f.close()
@@ -824,7 +838,7 @@ class ReduceM2FS:
                 id_lines_template0=m2fs.id_lines()#initialize values to zero-arrays
             ## TODO: Issue here due to the fact that we use the first extract1d_array, but the first could be 
             ## a virtual aperture... (or a masked one), so the mask is True everywhere.
-            realvirtualarray = np.loadtxt(self.tmppath+ 'real-virtual-array.txt')
+            realvirtualarray = np.loadtxt(self.outpath+ 'real-virtual-array.txt')
             firstreal = np.where(realvirtualarray>0.5)[0][0]
             # print("We use the first real aperture, which is number: {}".format(firstreal))
             id_lines_template0=fdump.get_id_lines_template(extract1d_array[firstreal],linelist,
@@ -837,7 +851,8 @@ class ReduceM2FS:
                                                           self.id_lines_continuum_rejection_iterations,
                                                           self.id_lines_continuum_rejection_sigma,self.id_lines_tol_angs,
                                                           id_lines_template_fiddle,id_lines_template0,
-                                                          self.resolution_order,self.resolution_rejection_iterations)
+                                                          self.resolution_order,self.resolution_rejection_iterations,
+                                                          self.idlinestemplate_datafile)
             pickle.dump(id_lines_template0,open(id_lines_template_file,'wb'))
 
     def id_lines_translate(self):
@@ -847,27 +862,24 @@ class ReduceM2FS:
         that corresponds to that filter. Now I am not 100% sure we'll need that in the future. For now,
         I just ignore it, but it should go in the questions and the TODO list.
         For now we assume we have one single template, and that is the first ThAr frame
+        TODO: The program still writes and read a hardcoded file 'real-virtual-array'. This should be modified.
         '''
 
         linelist_file = self.linelist_file
 
         ## This is to identify the first real aperture.
-        realvirtualarray = np.loadtxt(self.tmppath+ 'real-virtual-array.txt')
+        realvirtualarray = np.loadtxt(self.outpath+ 'real-virtual-array.txt')
         firstreal = np.where(realvirtualarray>0.5)[0][0]
     
         for file_id in self.arc_list:
-            extract1d_array_file = self.extract1d_array_files[(self.ccd, file_id)]
-            id_lines_array_file = self.id_lines_array_files[(self.ccd, file_id)]
-            # extract1d_array_file = self.tmppath + "{}{:04d}-extract1d-array.pickle".format(self.ccd, file_id)
-            data_file = self.filedict[(self.ccd, file_id)]
-            # id_lines_array_file = self.tmppath + "{}{:04d}-id-lines-array.pickle".format(self.ccd, file_id)
-            arcfiltername = "dummy-filter"
+            extract1d_array_file = self.extract1d_array_files[(self.ccd, file_id)] ## output file
+            id_lines_array_file = self.id_lines_array_files[(self.ccd, file_id)] ## input file (previous id)
+            # data_file = self.filedict[(self.ccd, file_id)] ## raw data file ## unused
+            # arcfiltername = "dummy-filter"
 
             id_lines_array_exist=path.exists(id_lines_array_file)
-
             if (not(id_lines_array_exist))|(id_lines_array_exist & self.overwrite):
-
-                data=astropy.nddata.CCDData.read(data_file)
+                # data=astropy.nddata.CCDData.read(data_file) ## PIC: unused
                 extract1d_array=pickle.load(open(extract1d_array_file,'rb'))
 
                 ## PIC: We just ignore all that for now. We just say "I have chosen a reference frame,
@@ -878,39 +890,26 @@ class ReduceM2FS:
                 # arc=np.where(arcfiltername==filtername)[0][0]
                 # template_root=str(arcfilename[arc])
                 ## --
+
+                ## Grab the default template file (aperture used to ID lines)
                 extract1d_array_template_file = \
                     self.extract1d_array_files[(self.ccd, self.arc_list[0])]
                 id_lines_template_file = self.id_lines_template_files[(self.ccd, self.arc_list[0])]
-
-                # extract1d_array_template_file = self.tmppath + \
-                #     "{}{:04d}-extract1d-array.pickle".format(self.ccd, self.arc_list[0])
-                # id_lines_template_file = self.tmppath + \
-                #     "{}{:04d}-id-lines-template.pickle".format(self.ccd, self.arc_list[0])
-                ## --
+                ## Load the template data
                 extract1d_array_template=pickle.load(open(extract1d_array_template_file,'rb'))
                 id_lines_template0=pickle.load(open(id_lines_template_file,'rb'))
+                
                 print('Translating line IDs and wavelength solution from ', self.arc_list[0],' to ', file_id)
                 if self.overwrite:
                     print('will overwrite existing version')
 
                 ## PIC Here again, I assume there is a unique line list.
-                # linelist_file=directory+'m2fs_'+filtername+'_thar_linelist'
-                linelist=fdump.get_linelist(linelist_file)
-
+                linelist=fdump.get_linelist(linelist_file) ## Read the line list
+                
                 id_lines_array=[]
-                for j in range(0,len(extract1d_array)):
-#                    for j in range(39,42):
-#                        plt.plot(extract1d_array[j].spec1d_flux)
-#                        plt.show()
-#                        plt.close()
-                                
-#                        print(extract1d_array[j].spec1d_flux)
-#                        print(j)
-#                        print(j,np.where(extract1d_array[j].spec1d_mask==False),' bbbbbbbbbbbbbbbbbbbbbbbbbbb')
-#                        print(' ')
-#                        extract1d_array_template[0].spec1d_mask[363]=False
+                for j in range(0,len(extract1d_array)): ## iterate through apertures.
                     print('working on aperture ',j)
-                    id_lines_array.append(m2fs.get_id_lines_translate(extract1d_array_template[firstreal],
+                    id_lines_array.append(fdump.get_id_lines_translate(extract1d_array_template[firstreal],
                                                                       id_lines_template0,extract1d_array[j], linelist,
                                                                       self.id_lines_continuum_rejection_low,
                                                                       self.id_lines_continuum_rejection_high,
@@ -923,8 +922,16 @@ class ReduceM2FS:
                                                                       self.id_lines_tol_angs,self.id_lines_tol_pix,
                                                                       self.resolution_order,
                                                                       self.resolution_rejection_iterations,
-                                                                      self.id_lines_translate_add_lines_iterations))
-                    
+                                                                      self.id_lines_translate_add_lines_iterations,
+                                                                      self.idlinestemplate_datafile))
+                # j = 0
+                # plt.figure()
+                # plt.plot(extract1d_array[j].spec1d_flux/np.max(extract1d_array[j].spec1d_flux))
+                # plt.plot(extract1d_array[j+2].spec1d_flux/np.max(extract1d_array[j+2].spec1d_flux))
+                # plt.plot(extract1d_array[j].spec1d_mask)
+                # plt.show()
+                # from IPython import embed
+                # embed()
                 pickle.dump(id_lines_array,open(id_lines_array_file,'wb'))
 
     def wavcal(self):
@@ -1308,8 +1315,6 @@ class ReduceM2FS:
         remove features that we believe to be something else than sky (e.g. overflow from other fibers)'''
         bounds = [6565.08, 6568.47]
 
-
-
     def skysubtract(self):
         '''Clearly, the subtraction need to be performed after some sort of normalization, otherwise, 
         it will induce weird things. The subtract method is merely a subtraction. I believe the 
@@ -1322,7 +1327,10 @@ class ReduceM2FS:
             if self.throughputcorr_bool:
                 infile = self.tmppath + "{}{:04d}-throughputcorr-array.pickle".format(self.ccd, file_id)
             else:
-                infile = self.extract1d_array_files[(self.ccd, file_id)]
+                if self.flat_field_bool:
+                    infile = self.extract1d_flatfield_array_files[(self.ccd, file_id)]
+                else:
+                    infile = self.extract1d_array_files[(self.ccd, file_id)]
                 # infile = self.tmppath + "{}{:04d}-cr-reject-array.pickle".format(self.ccd, file_id)
                 # infile = self.tmppath + "{}{:04d}-extract1d-array.pickle".format(self.ccd, file_id) ## PIC I test with this cause I think the problem comes from the rejection of
                                                                                                     ## the CR whih simply also marks the lines are cosmic rays.
@@ -1414,21 +1422,29 @@ class ReduceM2FS:
                     # plt.plot(throughputcorr_array[1].spec1d_flux)
                     # plt.plot(conts[1](np.arange(len(specs[1].flux))))
                     # plt.show()
-                    # from IPython import embed
-                    # embed()
+
                     from copy import deepcopy
                     norm_throughputcorr_array = []
-                    for i in range(len(throughputcorr_array)):
-                        norm_throughputcorr_array.append(deepcopy(throughputcorr_array[i]))
                     continuum = []
                     for i in range(len(throughputcorr_array)):
-                        _x, _y, c, ps = fdump.normalize(wavcal_array[i].wav, 
-                                                        norm_throughputcorr_array[i].spec1d_flux.value)
-                        # print(len(norm_throughputcorr_array[i].spec1d_flux), len(c))
-                        norm_throughputcorr_array[i].spec1d_flux = norm_throughputcorr_array[i].spec1d_flux/c
+                        norm_throughputcorr_array.append(deepcopy(throughputcorr_array[i]))
+                        c = np.ones(len(norm_throughputcorr_array[i].spec1d_flux.value))
                         continuum.append(c)
-                    continuum = np.array(continuum)
-                    
+                    if self.normalize_sky:
+                        continuum = []
+                        for i in range(len(throughputcorr_array)):
+                            ## TODO: The following is a quickfix and should be replaced ideally
+                            ##       by a check that we only perform the normalization on the
+                            ##       apertures that were not masked.
+                            if len(wavcal_array[i].wav)==0:
+                                c = 1
+                            else:
+                                _x, _y, c, ps = fdump.normalize(wavcal_array[i].wav, 
+                                                                norm_throughputcorr_array[i].spec1d_flux.value)
+                                # print(len(norm_throughputcorr_array[i].spec1d_flux), len(c))
+                                norm_throughputcorr_array[i].spec1d_flux = norm_throughputcorr_array[i].spec1d_flux/c
+                            continuum.append(c)
+                        continuum = np.array(continuum)
                     meansky=fdump.get_meansky(norm_throughputcorr_array,wavcal_array,plugmap0)#thar,id_lines_minlines,thar_mjd,mjd,plugmap0)
 
                     # from IPython import embed
@@ -1466,16 +1482,18 @@ class ReduceM2FS:
 
                     # from IPython import embed
                     # embed()
+                    import warnings, sys, os
 
                     sky_array=[]
                     skysubtract_array=[]
                     for k in range(0,len(throughputcorr_array)):
                         ## PIC /!\ CAUTION : TESTING TO NORMALIZE EVERYTHING
+                        # with warnings.catch_warnings():
                         sky,skysubtract=fdump.get_skysubtract(meansky,k,throughputcorr_array,wavcal_array)
 #                            sky,skysubtract=m2fs.get_skysubtract(meansky,k,cr_reject_array,wavcal_array)
                         sky_array.append(sky)
                         skysubtract_array.append(skysubtract)
-            
+
                 else:
                     print('no sky fibers -- so-called sky-subtracted frame is merely the throughput-corrected frame')
                 pickle.dump(sky_array,open(sky_array_file,'wb'))
@@ -1513,7 +1531,10 @@ class ReduceM2FS:
                 elif self.crreject_bool:
                     infile = self.cr_reject_array_files[(self.ccd, file_id)]
                 else:
-                    infile = self.extract1d_array_files[(self.ccd, file_id)]
+                    if self.flat_field_bool:
+                        infile = self.extract1d_flatfield_array_files[(self.ccd, file_id)]
+                    else:
+                        infile = self.extract1d_array_files[(self.ccd, file_id)]
                     # infile = self.tmppath + "{}{:04d}-cr-reject-array.pickle".format(self.ccd, file_id)
                 wavcal_array_file = self.wavcal_array_files[(self.ccd, file_id)]
                 # wavcal_array_file = self.tmppath + "{}{:04d}-wavcal-array.pickle".format(self.ccd, file_id)
@@ -1704,3 +1725,46 @@ class ReduceM2FS:
     def writefits(self):
         self._writefits('sky')
         self._writefits('raw')
+
+    def flat_field(self):
+        '''Function to correct spectra by flat spectra'''
+
+        ## Load the apertures for the default ThAr observation
+        if self.throughputcorr_bool:
+            reffile = self.tmppath + "{}{:04d}-throughputcorr-array.pickle".format(self.ccd, self.led_ref)
+        else:
+            reffile = self.extract1d_array_files[(self.ccd, self.led_ref)]     
+        led_array = pickle.load(open(reffile, 'rb'))
+
+        for file_id in self.sci_list:
+            if self.throughputcorr_bool:
+                infile = self.tmppath + "{}{:04d}-throughputcorr-array.pickle".format(self.ccd, file_id)
+                outfile = self.extract1d_flatfield_array_files[(self.ccd, file_id)]            
+            else:
+                infile = self.extract1d_array_files[(self.ccd, file_id)]            
+                outfile = self.extract1d_flatfield_array_files[(self.ccd, file_id)]            
+
+            if (not path.exists(outfile)) | (path.exists(outfile) & self.overwrite ):
+                
+                if (path.exists(outfile) & self.overwrite ):
+                    print('will overwrite {}'.format(outfile))
+
+                sci_array = pickle.load(open(infile, 'rb'))
+
+                for i in range(len(sci_array)):
+                    meanflatspec = np.nanmean(led_array[i].spec1d_flux)
+                    flatspec = led_array[i].spec1d_flux / meanflatspec
+                    
+                    # plt.figure()
+                    # plt.plot(sci_array[i].spec1d_flux)
+                    
+                    sci_array[i].spec1d_flux = sci_array[i].spec1d_flux / flatspec
+                    
+                    # plt.plot(sci_array[i].spec1d_flux)
+
+                    # plt.plot(flatspec)
+                    # plt.show()
+
+                pickle.dump(sci_array, open(outfile, 'wb'))
+
+        self.flat_field_bool = True
