@@ -197,22 +197,53 @@ class ReduceM2FS:
             led_list = np.array([int(float(ledliststr[i])) for i in range(len(ledliststr))])
             list_dict[utdate]['led_list'] = led_list
             ## Get the bias
-            if "," in sl[4]:
+            # if "," in sl[4]:
+            #     biasliststr = sl[4].split(",")
+            #     bias_list = np.arange(int(float(biasliststr[0])), int(float(biasliststr[1])))
+            # else:
+            #     biasliststr = sl[4].split("-")
+            #     bias_list = np.array([int(float(biasliststr[i])) for i in range(len(biasliststr))])
+            #     list_dict[utdate]['bias_list'] = bias_list
+            # list_dict[utdate]['bias_list'] = bias_list
+            if "-" in sl[4]:
+                biasliststr = sl[4].split("-")
+                strlist = []
+                for substr in biasliststr:
+                    if ',' in substr:
+                        subbiasliststr = substr.split(",")
+                        subarr = np.arange(int(float(subbiasliststr[0])), int(float(subbiasliststr[1])))  
+                    else:
+                        subarr = np.array([int(float(substr))])
+                    strlist.append(subarr)
+                ## Concatenate the sublists
+                bias_list = np.concatenate(strlist)
+            elif "," in sl[4]:
                 biasliststr = sl[4].split(",")
-                bias_list = np.arange(int(float(biasliststr[0])), int(float(biasliststr[1])))
+                bias_list = np.arange(int(float(biasliststr[0])), int(float(biasliststr[1]))+1)
             else:
                 biasliststr = sl[4].split("-")
                 bias_list = np.array([int(float(biasliststr[i])) for i in range(len(biasliststr))])
-                list_dict[utdate]['bias_list'] = bias_list
             list_dict[utdate]['bias_list'] = bias_list
             ## Get the dark
-            if "," in sl[5]:
+            if "-" in sl[5]:
+                darkliststr = sl[5].split("-")
+                strlist = []
+                for substr in darkliststr:
+                    if ',' in substr:
+                        subdarkliststr = substr.split(",")
+                        subarr = np.arange(int(float(subdarkliststr[0])), int(float(subdarkliststr[1]))+1)  
+                    else:
+                        subarr = np.array([int(float(substr))])
+                    strlist.append(subarr)
+                ## Concatenate the sublists
+                dark_list = np.concatenate(strlist)
+            elif "," in sl[5]:
                 darkliststr = sl[5].split(",")
-                dark_list = np.arange(int(float(darkliststr[0])), int(float(darkliststr[1])))
+                dark_list = np.arange(int(float(darkliststr[0])), int(float(darkliststr[1]))+1)
             else:
                 darkliststr = sl[5].split("-")
                 dark_list = np.array([int(float(darkliststr[i])) for i in range(len(darkliststr))])
-                list_dict[utdate]['dark_list'] = dark_list
+                # list_dict[utdate]['dark_list'] = dark_list
             list_dict[utdate]['dark_list'] = dark_list
             ## if given, grab the reference LED
             if len(sl)>6:
@@ -622,7 +653,7 @@ class ReduceM2FS:
             aperture_array=[]
             for j in range(0,len(apertures_profile_middle.fit)):
 #            if apertures_profile_middle.realvirtual[j]:
-                aperture_array.append(m2fs.get_aperture(j,columnspec_array,
+                aperture_array.append(fdump.get_aperture_fast(j,columnspec_array,
                                                         apertures_profile_middle,
                                                         middle_column,
                                                         self.trace_order,

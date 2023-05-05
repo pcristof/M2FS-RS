@@ -714,7 +714,7 @@ def on_key_find(event,args_list):
                 del(initial[len(initial)-1])
             ## PIC: Iterate through everything:
             specarray = columnspec_array[column].spec ## That's the think we plot
-            idx = peak_finder(specarray)
+            idx, _ = peak_finder(specarray)
             ntot = len(idx)
             for ieventxdata, eventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
@@ -743,7 +743,7 @@ def on_key_find(event,args_list):
                 del(initial[len(initial)-1])
             ## PIC: Iterate through everything:
             specarray = columnspec_array[column].spec ## That's the think we plot
-            idx = peak_finder(specarray)
+            idx, _ = peak_finder(specarray)
             ntot = len(idx)
             for ieventxdata, eventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
@@ -787,7 +787,7 @@ def on_key_find(event,args_list):
             # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
             ## PIC: Iterate through everything:
             specarray = columnspec_array[column].spec ## That's the think we plot
-            idx = peak_finder(specarray)
+            idx, _ = peak_finder(specarray)
             ntot = len(idx)
             for ieventxdata, enventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
@@ -831,7 +831,7 @@ def on_key_find(event,args_list):
             # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
             ## PIC: Iterate through everything:
             specarray = columnspec_array[column].spec ## That's the think we plot
-            idx = peak_finder(specarray)
+            idx, _ = peak_finder(specarray)
             ntot = len(idx)
             for ieventxdata, enventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
@@ -935,7 +935,7 @@ def peak_finder(y):
     #     plt.axvline(nx[nidx[i]])
     # plt.show()
 
-    return nx[nidx]
+    return nx[nidx], ny[nidx]
 
 from astropy.io import fits
 
@@ -2045,7 +2045,7 @@ def get_aperture_profile(apertures_initial,spec1d,continuum,window):
         g_fit.append(g_fit0)
         realvirtual.append(True)
         initial.append(True)
-    return aperture_profile(g_fit,subregion,realvirtual,initial)
+    return m2fs.aperture_profile(g_fit,subregion,realvirtual,initial)
 
 def fit_aperture(spec,window,x_center):
     import numpy as np
@@ -2468,11 +2468,16 @@ def get_aperture_fast(j,columnspec_array,apertures_profile_middle,middle_column,
             center=func[len(func)-1](x[i])
             if((center>0.)&(center<np.max(columnspec_array[i].pixel.value))):#make sure the trace function y(x) makes sense at this x
                 spec1d=Spectrum1D(spectral_axis=columnspec_array[i].pixel,flux=columnspec_array[i].spec*u.electron,uncertainty=columnspec_array[i].err,mask=columnspec_array[i].mask)
-                subregion0,g_fit0=fit_aperture(spec1d-columnspec_array[i].continuum(columnspec_array[i].pixel.value),window,center)
+                # subregion0,g_fit0=fit_aperture(spec1d-columnspec_array[i].continuum(columnspec_array[i].pixel.value),window,center)
                 ## PIC: Instead of refitting the entire thing all the time, I assume that the width is fixed 
                 ## (estimated from the middle profile.)
                 ## There "all" we need to update is the maximum position and value
-                peak_finder((spec1d-columnspec_array[i].continuum(columnspec_array[i].pixel.value)).data)
+                pos, amp = peak_finder((spec1d-columnspec_array[i].continuum(columnspec_array[i].pixel.value)).data)
+                newmeanidx = np.where((pos-center)**2==np.min((pos-center)**2))[0][0]
+                newmean = pos[newmeanidx]
+                newamp = amp[newmeanidx]
+                g_fit0 = models.Gaussian1D(amplitude=newamp*u.electron, mean=newmean*u.AA,
+                                           stddev=apertures_profile_middle.fit[j].stddev.value*u.AA)
                 y1.append(g_fit0.stddev.value)
                 y2.append(g_fit0.amplitude.value)
             else:#otherwise give a place-holder value and mask it below
@@ -2524,5 +2529,5 @@ def get_aperture_fast(j,columnspec_array,apertures_profile_middle,middle_column,
         profile_amplitude=-999
         profile_amplitude_rms=-999
         profile_npoints=-999
-    aperture0=aperture(trace_aperture=j+1,trace_func=func[len(func)-1],trace_rms=rms[len(rms)-1],trace_npoints=npoints[len(npoints)-1],trace_pixel_min=pix_min[len(pix_min)-1],trace_pixel_max=pix_max[len(pix_max)-1],profile_sigma=profile_sigma,profile_sigma_rms=profile_sigma_rms,profile_amplitude=profile_amplitude,profile_amplitude_rms=profile_amplitude_rms,profile_npoints=profile_npoints)
+    aperture0=m2fs.aperture(trace_aperture=j+1,trace_func=func[len(func)-1],trace_rms=rms[len(rms)-1],trace_npoints=npoints[len(npoints)-1],trace_pixel_min=pix_min[len(pix_min)-1],trace_pixel_max=pix_max[len(pix_max)-1],profile_sigma=profile_sigma,profile_sigma_rms=profile_sigma_rms,profile_amplitude=profile_amplitude,profile_amplitude_rms=profile_amplitude_rms,profile_npoints=profile_npoints)
     return aperture0
