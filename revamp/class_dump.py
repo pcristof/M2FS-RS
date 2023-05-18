@@ -129,6 +129,8 @@ class ReduceM2FS:
 
         self.twilight = False
 
+        self.binning = [2,2] ## Default binning 
+
     ## Setters
     def set_datapath(self, datapath):
         if not os.path.isdir(datapath):
@@ -143,7 +145,7 @@ class ReduceM2FS:
         elif 'r' in ccd:
             self.ccd = 'r'; print('Red ccd selected')
         elif 'b' in ccd:
-            self.ccd = 'r'; print('Red ccd selected')
+            self.ccd = 'b'; print('Blue ccd selected')
         else:
             fail=True
         if fail:
@@ -157,6 +159,30 @@ class ReduceM2FS:
         else:
             raise IOError("Please provide a 'datafile' input file name.")
 
+    def set_binning(self, dims):
+        self.binning = dims
+
+    def check_data(self):
+        '''Function to check that the files input frames exist, are not corrupted, 
+        and that their dimensions match. Also update the binning attributes to that
+        the program can automatically handle different binnings.'''
+        inidims=[0,0]
+        ccd = self.ccd
+        for tile in range(1, 5):
+            for fileoro in self.full_list:
+                _fname = self.rawfiledict[(ccd, tile, fileoro)]
+                if not os.path.isfile(_fname):
+                    raise Exception('File not found: '+_fname)
+                data = fits.getdata(_fname)
+                datadims = np.shape(data)
+                ndims = [int(round(datadims[0]/1000)), int(round(datadims[1]/1000))]
+                if inidims==[0,0]: inidims = ndims
+                #
+                if ndims != inidims:
+                    raise Exception('Binning inconsistent for file: '+_fname)
+        #
+        self.set_binning(inidims)
+    
     def read_data(self):
         if self.filename is None:
             raise IOError("No file. Please provide a 'datafile' input file name.")
@@ -269,7 +295,7 @@ class ReduceM2FS:
         self.led_list = list_dict[self.utdate]['led_list']
         self.bias_list = list_dict[self.utdate]['bias_list']
         self.dark_list = list_dict[self.utdate]['dark_list']
-        self.all_list = np.concatenate([self.sci_list, self.arc_list, self.led_list], 0)
+        self.all_list = np.concatenate([self.led_list, self.sci_list, self.arc_list], 0)
         self.full_list  = np.concatenate([self.sci_list, self.arc_list, self.led_list, self.bias_list, self.dark_list], 0)
         self.led_ref = led_ref
         self.arc_ref = arc_ref
@@ -394,16 +420,23 @@ class ReduceM2FS:
     ## --                              -- ##
     def zero_corr(self):
         for tile in range(1, 5):
-            fdump.zero_corr(self.rawfiledict, self.ccd, tile, self.bias_list, self.masterbiasframes[(self.ccd, tile)])
+            fdump.zero_corr(self.rawfiledict, self.ccd, tile, self.bias_list, 
+                            self.masterbiasframes[(self.ccd, tile)], self.binning)
     def dark_corr(self):
         for tile in range(1, 5):
             fdump.dark_corr(self.rawfiledict, self.ccd, tile, self.dark_list,
-                            self.masterbiasframes[(self.ccd, tile)], self.masterdarkframes[(self.ccd, tile)])  
+                            self.masterbiasframes[(self.ccd, tile)], 
+                            self.masterdarkframes[(self.ccd, tile)], self.binning)  
     def stitch_frames(self):
         ## For each file name, and for the global ccd, we combine the tiles.
         for file_id in self.all_list:
             fdump.stitch_frames(self.ccd, file_id, self.rawfiledict, self.masterbiasframes, 
-                                self.masterdarkframes, self.filedict)    
+                                self.masterdarkframes, self.filedict, self.binning)   
+    def stitch_frames_nocorr(self):
+        ## For each file name, and for the global ccd, we combine the tiles.
+        for file_id in self.all_list:
+            fdump.stitch_frames_nocorr(self.ccd, file_id, self.rawfiledict, self.masterbiasframes, 
+                                self.masterdarkframes, self.filedict, self.binning)    
     ## --                              -- ##
     ########################################
     ########################################
@@ -523,15 +556,19 @@ class ReduceM2FS:
         #     image_boundary_fiddle=False
         #     image_boundary=m2fs.get_image_boundary(data,image_boundary_fiddle,image_boundary0)
         #     pickle.dump(image_boundary,open(image_boundary_file,'wb'))#save pickle to file
-        
+
+        binning = self.binning
+        revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
+
         ## Let's hardcode some boundaries:
         x1 = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) + 10
         x2 = np.array([2048, 2048, 2048, 2048, 2048, 
                        2048, 2048, 2048, 2048, 2048]) - 10
+        x2 = x2 * revbin[1]
         y1 = np.array([0, 250, 500, 750, 1000, 
-                       1250, 1520, 1780, 2056, 2056])
+                       1250, 1520, 1780, 2056, 2056]) * revbin[0]
         y2 = np.array([0, 51,  290, 360, 790, 
-                       1040, 1290, 1550, 1820, 2056])
+                       1040, 1290, 1550, 1820, 2056]) * revbin[0]
         image_boundary0=m2fs.image_boundary()
         image_boundary_fiddle=False
         image_boundary = m2fs.image_boundary(lower=[(x1[q],y1[q]) 
@@ -607,6 +644,12 @@ class ReduceM2FS:
             apertures_profile_middle=columnspec_array[middle_column].apertures_profile
         else: 
             return 1
+        
+        ## This is completely dumb, but for now I have to bypass the code before in order to 
+        ## set the middle column to something else. This means that I have to restart the find
+        ## every time I run this function.
+        # middle_column=np.long(len(columnspec_array)/4)
+        # apertures_profile_middle=columnspec_array[middle_column].apertures_profile
 
         apertures_profile_middle=fdump.fiddle_apertures(columnspec_array,middle_column,
                                                         self.window, apertures_profile_middle,

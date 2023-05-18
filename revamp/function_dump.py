@@ -14,10 +14,12 @@ from astropy.nddata import StdDevUncertainty
 import matplotlib.pyplot as plt
 
 
-def zero_corr(filedict, color, ccd, bias_list, outfile):
+def zero_corr(filedict, color, ccd, bias_list, outfile, binning):
     '''This function performs the initial correction of the data and writes the new data
     to fits files. It is a revamped version of the m2fs_zero_jan20.py script.
     There are still a lot of hardcoded stuff that should really not be.'''
+
+    revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
 
     obs_readnoise=[]
     master_processed=[]
@@ -32,9 +34,9 @@ def zero_corr(filedict, color, ccd, bias_list, outfile):
         data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
         # print(filename,data.header['object'],data.header['binning'])
 
-        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
-        trimmed1=ccdproc.trim_image(oscan_subtracted[:,:1024],add_keyword={'trim1':'Done'})
-        trimmed2=ccdproc.trim_image(trimmed1[:1028,:1024],add_keyword={'trim2':'Done'})
+        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,revbin[1]*1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
+        trimmed1=ccdproc.trim_image(oscan_subtracted[:,:revbin[1]*1024],add_keyword={'trim1':'Done'})
+        trimmed2=ccdproc.trim_image(trimmed1[:revbin[0]*1028,:revbin[1]*1024],add_keyword={'trim2':'Done'})
         array1d=trimmed2.data.flatten()
         gain=np.float(trimmed2.header['egain'])
         keep=np.where(np.abs(array1d)<100.)[0] #remove crazy outliers
@@ -92,10 +94,12 @@ def zero_corr(filedict, color, ccd, bias_list, outfile):
     ccdall[0].header['egain']=str(gain)
     ccdall.write(outfile, overwrite=True)
 
-def dark_corr(filedict, color, ccd, dark_list, masterbiasfile, outfile):
+def dark_corr(filedict, color, ccd, dark_list, masterbiasfile, outfile, binning):
     '''This function performs the initial correction of the data and writes the new data
     to fits files. It is a revamped version of the m2fs_zero_jan20.py script.
     There are still a lot of hardcoded stuff that should really not be.'''
+
+    revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
 
     master_bias=astropy.nddata.CCDData.read(masterbiasfile)
 
@@ -107,9 +111,9 @@ def dark_corr(filedict, color, ccd, dark_list, masterbiasfile, outfile):
     for i, dark_id in enumerate(dark_list):        
         filename = filedict[(color, ccd, dark_id)]
         data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
-        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
-        trimmed1=ccdproc.trim_image(oscan_subtracted[:,:1024],add_keyword={'trim1':'Done'})
-        trimmed2=ccdproc.trim_image(trimmed1[:1028,:1024],add_keyword={'trim2':'Done'})
+        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,revbin[1]*1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
+        trimmed1=ccdproc.trim_image(oscan_subtracted[:,:revbin[1]*1024],add_keyword={'trim1':'Done'})
+        trimmed2=ccdproc.trim_image(trimmed1[:revbin[0]*1028,:revbin[1]*1024],add_keyword={'trim2':'Done'})
         exptime.append(data.header['exptime'])
         master_exptime.append(data.header['exptime'])
 
@@ -138,9 +142,99 @@ def dark_corr(filedict, color, ccd, dark_list, masterbiasfile, outfile):
     ccdall.header['exptime']=np.mean(master_exptime)
     ccdall.write(outfile, overwrite=True)
 
-def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes, filedict):
+def stitch_frames_nocorr(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes, filedict, binning):
     # for filename in framelist:
     # for file_id in all_list:
+    revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
+    for tile in np.arange(1, 5):
+        filename = rawfiledict[(ccd, tile, file_id)]
+        masterbiasfile = masterbiasframes[(ccd, tile)]
+        masterdarkfile = masterdarkframes[(ccd, tile)]
+        outfile = filedict[(ccd, file_id)]
+
+        # master_bias=astropy.nddata.CCDData.read(masterbiasfile)
+        # obs_readnoise=np.float(master_bias.header['obs_rdnoise'])
+        # master_dark=astropy.nddata.CCDData.read(masterdarkfile)
+
+        data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
+        gain=np.float(data.header['egain'])
+
+        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,revbin[1]*1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
+        trimmed1=ccdproc.trim_image(oscan_subtracted[:,:revbin[1]*1024],add_keyword={'trim1':'Done'})
+        trimmed2=ccdproc.trim_image(trimmed1[:revbin[0]*1028,:revbin[1]*1024],add_keyword={'trim2':'Done'})
+
+#         debiased0=ccdproc.subtract_bias(trimmed2,master_bias)
+#         dedark0=ccdproc.subtract_dark(debiased0,master_dark,exposure_time='exptime',exposure_unit=u.second,scale=True,add_keyword={'dark_corr':'Done'})
+
+#         data_with_deviation=ccdproc.create_deviation(dedark0,gain=data.meta['egain']*u.electron/u.adu,readnoise=obs_readnoise*u.electron)
+
+#         gain_corrected=ccdproc.gain_correct(data_with_deviation,data_with_deviation.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
+# #                master_dark_gain_corrected=ccdproc.gain_correct(master_dark,master_dark.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
+# #                master_bias_gain_corrected=ccdproc.gain_correct(master_bias,master_bias.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
+
+#         # from IPython import embed
+#         # embed()
+#         gain_corrected2=deepcopy(gain_corrected)
+#         ## PIC: Just for fun I bypass the corrections here:
+#         # gain_corrected2.data=trimmed2.data
+#         exptime_ratio=np.float(data.header['exptime'])/np.float(master_dark.meta['exptime'])
+
+#         ntot = len(gain_corrected2.data)
+#         for k in range(0,len(gain_corrected2.data)):
+#             for q in range(0,len(gain_corrected2.data[k])):
+#                 gain_corrected2.uncertainty.quantity.value[k][q]=(np.max(np.array([gain_corrected2.data[k][q]+master_dark.data[k][q]*gain*exptime_ratio+2.+obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2,0.6*(obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+# #                        poop1=(np.max(np.array([gain_corrected2.data[k][q]+master_dark.data[k][q]*gain*exptime_ratio+2.+obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2,0.6*(obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+# #                        poop2=(np.max(np.array([gain_corrected2.data[k][q]+2.+obs_readnoise**2,0.6*(obs_readnoise**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+# #                        print(poop1/poop2)
+# #                cr_cleaned=ccdproc.cosmicray_lacosmic(gain_corrected,sigclip=10)
+#             print("Uncertainty computation {:0.0f}%".format(k/ntot*100), end='\r')
+#         print("Uncertainty computation {:0.0f}%".format(k/ntot*100))
+# #                bad=np.where(gain_corrected.data<0.)
+# #                bad=np.where(gain_corrected._uncertainty.quantity.value!=gain_corrected._uncertainty.quantity.value)#bad variances due to negative counts after overscan/bias/dark correction
+# #                gain_corrected.uncertainty.quantity.value[bad]=obs_readnoise
+        if 'c1' in filename:
+            # c1_reduce=gain_corrected2
+            c1_reduce = trimmed2
+        if 'c2' in filename:
+            # c2_reduce=gain_corrected2
+            c2_reduce = trimmed2
+        if 'c3' in filename:
+            # c3_reduce=gain_corrected2
+            c3_reduce = trimmed2
+        if 'c4' in filename:
+            # c4_reduce=gain_corrected2
+            c4_reduce = trimmed2
+    # from IPython import embed
+    # embed()
+
+    left_data=np.concatenate((c1_reduce,np.flipud(c4_reduce)),axis=0)#left half of stitched image
+    # left_uncertainty=np.concatenate((c1_reduce.uncertainty._array,np.flipud(c4_reduce.uncertainty._array)),axis=0)
+    # left_mask=np.concatenate((c1_reduce.mask,np.flipud(c4_reduce.mask)),axis=0)
+    right_data=np.concatenate((np.fliplr(c2_reduce),np.fliplr(np.flipud(c3_reduce))),axis=0)#right half of stitched image
+    # right_uncertainty=np.concatenate((np.fliplr(c2_reduce.uncertainty._array),np.fliplr(np.flipud(c3_reduce.uncertainty._array))),axis=0)
+    # right_mask=np.concatenate((np.fliplr(c2_reduce.mask),np.fliplr(np.flipud(c3_reduce.mask))),axis=0)
+
+    stitched_data=np.concatenate((left_data,right_data),axis=1)
+    # stitched_uncertainty=np.concatenate((left_uncertainty,right_uncertainty),axis=1)
+    # stitched_mask=np.concatenate((left_mask,right_mask),axis=1)
+
+    stitched=astropy.nddata.CCDData(stitched_data,unit=u.electron,uncertainty=StdDevUncertainty(np.ones(np.shape(stitched_data))),mask=np.zeros(np.shape(stitched_data)))
+
+#            bad=np.where(stitched_uncertainty!=stitched_uncertainty)#bad variances due to negative counts after overscan/bias/dark correction
+#            stitched_mask[bad]=True
+#            stitched_uncertainty[bad]=1.e+10
+#            stitched.uncertainty=stitched_uncertainty
+#            stitched.mask=stitched_mask
+#            stitched.mask[bad]=True
+    stitched.header=c1_reduce.header
+    stitched.write(outfile, overwrite=True)
+    print("stitch_frames: Done")
+
+def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes, filedict, binning):
+    # for filename in framelist:
+    # for file_id in all_list:
+    revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
+
     for tile in np.arange(1, 5):
         filename = rawfiledict[(ccd, tile, file_id)]
         masterbiasfile = masterbiasframes[(ccd, tile)]
@@ -154,9 +248,9 @@ def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes,
         data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
         gain=np.float(data.header['egain'])
 
-        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
-        trimmed1=ccdproc.trim_image(oscan_subtracted[:,:1024],add_keyword={'trim1':'Done'})
-        trimmed2=ccdproc.trim_image(trimmed1[:1028,:1024],add_keyword={'trim2':'Done'})
+        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,revbin[1]*1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
+        trimmed1=ccdproc.trim_image(oscan_subtracted[:,:revbin[1]*1024],add_keyword={'trim1':'Done'})
+        trimmed2=ccdproc.trim_image(trimmed1[:revbin[0]*1028,:revbin[1]*1024],add_keyword={'trim2':'Done'})
 
         debiased0=ccdproc.subtract_bias(trimmed2,master_bias)
         dedark0=ccdproc.subtract_dark(debiased0,master_dark,exposure_time='exptime',exposure_unit=u.second,scale=True,add_keyword={'dark_corr':'Done'})
@@ -613,6 +707,7 @@ def fiddle_apertures(columnspec_array,column,window,apertures,find_apertures_fil
     print('press \'h\' to iteratively fit all the even apertures \n')
     print('press \'j\' to iteratively fit all the odd apertures \n')
     print('press \'p\' to iteratively mark all apertures as phantom \n')
+    print('press \'k\' to iteratively fit the n apertures starting at i \n')
     print('press \'d\' to delete aperture nearest cursor \n')
     print('press \'e\' to delete all apertures \n')
     print('press \'n\' to add new real aperture at cursor position \n')
@@ -625,6 +720,7 @@ def fiddle_apertures(columnspec_array,column,window,apertures,find_apertures_fil
                                                                                   fit,realvirtual,
                                                                                   initial,window,fig]))
     plt.show()
+    print('This is the column I get: {}'.format(column))
 #    plt.savefig(find_apertures_file,dpi=200)
     subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
     return m2fs.aperture_profile(fit,subregion,realvirtual,initial)
@@ -639,9 +735,9 @@ def on_key_find(event,args_list):
 
     print('you pressed ', event.key)
 
-    keyoptions = ['z', 'd', 'e', 'n', 'a', 'q', 'r', 'g', 'h', 'j', 'p']
+    keyoptions = ['z', 'd', 'e', 'n', 'a', 'q', 'r', 'g', 'h', 'j', 'p', 'c', 'k']
 
-    global columnspec_array,subregion,fit,realvirtual,initial,window
+    global columnspec_array,column,subregion,fit,realvirtual,initial,window
     columnspec_array,column,subregion,fit,realvirtual,initial,window,fig=args_list
 
     if event.key in keyoptions:
@@ -713,7 +809,7 @@ def on_key_find(event,args_list):
             for q in range(0,len(initial)):
                 del(initial[len(initial)-1])
             ## PIC: Iterate through everything:
-            specarray = columnspec_array[column].spec ## That's the think we plot
+            specarray = columnspec_array[column].spec ## That's the thing we plot
             idx, _ = peak_finder(specarray)
             ntot = len(idx)
             for ieventxdata, eventxdata in enumerate(idx):
@@ -816,6 +912,64 @@ def on_key_find(event,args_list):
             print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100))
             subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
 
+        if event.key=='k':
+            ini = input('Start at aperture i. Enter i: ')
+            nap = input('fit every n apertures. Enter n: ')
+            csa = input('how many consecutive apertures (default=1). Enter n: ')
+            nap = int(float(nap))
+            ini = int(float(ini)-1)
+            if csa.isnumeric():
+                csa = int(float(csa))
+            else:
+                csa = 1
+            ## PIC: First delete everything:
+            aperture_centers=[fit[q].mean for q in range(0,len(fit))]
+            print('deleting all apertures ')
+            for q in range(0,len(subregion)):
+                del(subregion[len(subregion)-1])
+            for q in range(0,len(fit)):
+                del(fit[len(fit)-1])
+            for q in range(0,len(realvirtual)):
+                del(realvirtual[len(realvirtual)-1])
+            for q in range(0,len(initial)):
+                del(initial[len(initial)-1])
+            # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+            ## PIC: Iterate through everything:
+            specarray = columnspec_array[column].spec ## That's the think we plot
+            idx, _ = peak_finder(specarray)
+            ntot = len(idx)
+            allowed_apertures = []
+            for iii in range(150):
+                for _csa in range(1, csa+1):
+                    allowed_apertures.append(ini+_csa-1+nap*iii)
+            for ieventxdata, enventxdata in enumerate(idx):
+                print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
+                if ieventxdata in allowed_apertures:
+                    new_center=np.float(enventxdata)
+                    x_center=new_center
+                    spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
+                    subregion0,fit0=m2fs.fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+                    subregion.append(subregion0)
+                    fit.append(fit0)
+                    realvirtual.append(True)
+                    initial.append(False)
+                    # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+                else:
+                    new_center=np.float(enventxdata)
+                    x_center=new_center
+                    val1=x_center-window/2.
+                    val2=x_center+window/2.
+                    subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
+                    aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+                    halfwindow=window/2.
+                    fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
+                    realvirtual.append(False)
+                    initial.append(False)
+                    # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
+            print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100))
+            subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
+
+
         if event.key=='p':
             ## PIC: First delete everything:
             aperture_centers=[fit[q].mean for q in range(0,len(fit))]
@@ -873,6 +1027,12 @@ def on_key_find(event,args_list):
             realvirtual.append(False)
             initial.append(False)
             subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+
+        if event.key=='c':
+            ## Update the column number
+            newcolumn = input("Column nb: ")
+            diff = column - int(float(newcolumn))
+            column -= diff
 
         if event.key=='q':
             plt.close(event.canvas.figure)
