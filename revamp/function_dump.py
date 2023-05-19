@@ -1099,32 +1099,6 @@ def peak_finder(y):
 
 from astropy.io import fits
 
-def gen_plugmap(filename):
-    '''Function to read the fits header a build a plug map.
-    The function will check all the fits headers for inconsistencies.
-    For now we only check the ThAr, LED, and Science frames.
-    '''     
-    statuses = []
-    headers = []
-    objtype = []
-
-    hdu = fits.open(filename)
-    for header in hdu[0].header:
-        if 'FIBER' in header:
-            stat = hdu[0].header[header]
-            statuses.append(stat)
-            headers.append(header)
-            if 'unplug' in stat.lower():
-                objtype.append('unused')
-            elif 'sky' in stat.lower():
-                objtype.append('SKY')
-            else:
-                objtype.append('TARGET')
-    hdu.close()
-
-    return statuses, headers, objtype
-
-
 import pickle
 def get_id_lines_template(extract1d,linelist,continuum_rejection_low,continuum_rejection_high,
                           continuum_rejection_iterations,continuum_rejection_order,threshold_factor,
@@ -2691,3 +2665,137 @@ def get_aperture_fast(j,columnspec_array,apertures_profile_middle,middle_column,
         profile_npoints=-999
     aperture0=m2fs.aperture(trace_aperture=j+1,trace_func=func[len(func)-1],trace_rms=rms[len(rms)-1],trace_npoints=npoints[len(npoints)-1],trace_pixel_min=pix_min[len(pix_min)-1],trace_pixel_max=pix_max[len(pix_max)-1],profile_sigma=profile_sigma,profile_sigma_rms=profile_sigma_rms,profile_amplitude=profile_amplitude,profile_amplitude_rms=profile_amplitude_rms,profile_npoints=profile_npoints)
     return aperture0
+
+## Add some function to read and format fibermaps
+def check_headers(nbfibers, ccd, all_list, filedict):
+
+    ## Check that the headers are the same for all files.
+    statuses = []
+    headers = []
+    objtype = []
+    for file_id in all_list:
+        filename = filedict[(ccd, file_id)]
+        plugmapdic = gen_plugmap(filename)
+        _headers = []
+        _statuses = []
+        _objtype = []
+        for cassette in np.arange(1,9):
+            for fibernb in np.arange(1,17):
+                _headers.append('FIBER{}{}'.format(cassette, fibernb))
+                _statuses.append(plugmapdic[cassette][fibernb]['identifier'])
+                _objtype.append(plugmapdic[cassette][fibernb]['objtype'])
+
+        if len(_statuses)!=nbfibers:
+            raise Exception("gen_plugmap: Cannot ID 128 fibers?")
+        statuses.append(_statuses)
+        headers.append(_headers)
+        objtype.append(_objtype)
+    ## Check that we have the same thing for all files:
+    for i in range(nbfibers):
+        _stat = statuses[0][i] ## First file status
+        _head = headers[0][i]
+        _obj = objtype[0][i]
+        for j in range(1, len(all_list)):
+            if statuses[j][i]!=_stat:
+                raise Exception('gen_plugmap: inconsistency in status headers')
+            if headers[j][i]!=_head:
+                raise Exception('gen_plugmap: inconsistency in status headers')
+            if objtype[j][i]!=_obj:
+                raise Exception('gen_plugmap: inconsistency in status headers')
+
+# def read_header(nbfibers, ccd, all_list, filedict):
+#     '''Function to read a fibermap from header
+#     Input parameters:
+#     - nbfibers  :   number of fibers expected'''
+#     ## We then take the first file headers: 
+#     objtype = objtype[0]
+#     identifiers = statuses[0]
+#     _statuses, _headers, _objtype = gen_plugmap(filedict[(ccd, all_list[0])])
+
+def gen_plugmap(filename):
+    '''Function to read the fits header a build a plug map.
+    The function will check all the fits headers for inconsistencies.
+    For now we only check the ThAr, LED, and Science frames.
+    '''     
+    ids = []
+    headers = []
+    objtype = []
+
+    hdu = fits.open(filename)
+    for header in hdu[0].header:
+        if 'FIBER' in header:
+            stat = hdu[0].header[header]
+            ids.append(stat)
+            headers.append(header)
+            if 'unplug' in stat.lower():
+                objtype.append('unused')
+            elif 'sky' in stat.lower():
+                objtype.append('SKY')
+            else:
+                objtype.append('TARGET')
+    hdu.close()
+
+    plugmapdic = {1:{}, 2:{}, 3:{}, 4:{}, 5:{}, 6:{}, 7:{}, 8:{}} ## Initialize cassettes dics
+    for i in range(len(headers)):
+        fiberstring = headers[i].replace('FIBER', '')
+        cassette = int(float(fiberstring[0])) ## This is the cassette number
+        fibernb = int(float(fiberstring[1:])) ## This is the fiber number
+        plugmapdic[cassette][fibernb] = {'objtype': objtype[i], 'identifier': ids[i]}
+
+    return plugmapdic #ids, headers, objtype
+
+def order_halphali(plugmapdic, cassettes_order):
+    '''Function to orde the Halpha-Li filter.
+    The order has two consecutive orders.'''
+
+    objtypes = []
+    apertures = []
+    identifiers = []
+    fibers = []
+
+    aperture=1 ## We're gonna count the apertures
+    for cassette in cassettes_order:
+        for fibernb in range(16, 0, -1): ## from top to botton, for both ccd is the same
+            if 'unused' in plugmapdic[cassette][fibernb]['objtype']: continue
+            # First order
+            apertures.append(aperture)
+            objtypes.append(plugmapdic[cassette][fibernb]['objtype'])
+            identifiers.append(plugmapdic[cassette][fibernb]['identifier'])
+            fibers.append('FIBER{}{:02d}'.format(cassette, fibernb))
+            aperture+=1
+            # Second order
+            apertures.append(aperture)
+            objtypes.append(plugmapdic[cassette][fibernb]['objtype'])
+            identifiers.append(plugmapdic[cassette][fibernb]['identifier'])
+            fibers.append('FIBER{}{:02d}'.format(cassette, fibernb))
+            aperture+=1
+
+    ## We may be having less than 128 apertures, and yet, our program currently needs 128
+    ## For now I "complete" the missing apertures to reach 128. In the future we could
+    ## Try to do things in a more clever way?
+    ## I am still confused by this 128 number - I can't quite understand if that's an absolute
+    ## maximum, since I see many more with the blue filter. And with Novembder Halpha-Li data
+    ## We have only 120 plugged fibers, but still 128 traces...
+
+    while len(fibers)<128: 
+        apertures.append(aperture)
+        objtypes.append('UNUSED')
+        identifiers.append('')
+        fibers.append('FIBER{}{:02d}'.format(cassette, fibernb))
+        aperture+=1
+    
+    return apertures, identifiers, objtypes
+
+def order_fibers(plugmapdic, ccd, filter):
+    '''Function to order the fiber based on filter and CCD'''
+    
+    if 'r' in ccd: ## Red ccd
+        cassettes_order = np.arange(8, 0, -1) ## From top to bottom of image
+    elif 'b' in ccd: ## Red ccd
+        cassettes_order = np.arange(1, 9, 1) ## From top to bottom of image
+    
+    if 'halphali' in filter:
+        apertures, identifiers, objtypes = order_halphali(plugmapdic, cassettes_order)
+    else:
+        raise Exception('function_dump.order_fibers: unkwnown filter')
+    return apertures, identifiers, objtypes

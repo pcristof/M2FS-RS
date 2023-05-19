@@ -129,7 +129,8 @@ class ReduceM2FS:
 
         self.twilight = False
 
-        self.binning = [2,2] ## Default binning 
+        self.binning = [2,2] ## Default binning
+        self.filter = 'halphali' ## Will ignore - _ spaces and caps 
 
     ## Setters
     def set_datapath(self, datapath):
@@ -137,6 +138,12 @@ class ReduceM2FS:
             raise Exception("Provided or default path does not exist")
         if datapath[-1]!="/": datapath+="/"
         self.datapath = datapath
+
+    def set_filter(self, filtername):
+        myfilter = filtername.lower()
+        myfilter = myfilter.replace('-', '').replace('_', '')
+        myfilter = myfilter.replace(' ', '').strip()
+        self.filter = myfilter
 
     def set_ccd(self, ccd):
         fail = False
@@ -447,56 +454,69 @@ class ReduceM2FS:
         For now we only check the ThAr, LED, and Science frames.
         '''
         nbfibers = 128 # this is the number of fibers we should have. TODO make this an attribute
-        statuses = []
-        headers = []
-        objtype = []
-        for file_id in self.all_list:
-            filename = self.filedict[(self.ccd, file_id)]
-            _statuses, _headers, _objtype = fdump.gen_plugmap(filename)
-            if len(_statuses)!=nbfibers:
-                raise Exception("gen_plugmap: Cannot ID 128 fibers?")
-            statuses.append(_statuses)
-            headers.append(_headers)
-            objtype.append(_objtype)
-        ## Check that we have the same thing for all files:
-        for i in range(nbfibers):
-            _stat = statuses[0][i] ## First file status
-            _head = headers[0][i]
-            _obj = objtype[0][i]
-            for j in range(1, len(self.all_list)):
-                if statuses[j][i]!=_stat:
-                    raise Exception('gen_plugmap: inconsistency in status headers')
-                if headers[j][i]!=_head:
-                    raise Exception('gen_plugmap: inconsistency in status headers')
-                if objtype[j][i]!=_obj:
-                    raise Exception('gen_plugmap: inconsistency in status headers')
+        # statuses = []
+        # headers = []
+        # objtype = []
+        # for file_id in self.all_list:
+        #     filename = self.filedict[(self.ccd, file_id)]
+        #     _statuses, _headers, _objtype = fdump.gen_plugmap(filename)
+        #     if len(_statuses)!=nbfibers:
+        #         raise Exception("gen_plugmap: Cannot ID 128 fibers?")
+        #     statuses.append(_statuses)
+        #     headers.append(_headers)
+        #     objtype.append(_objtype)
+        # ## Check that we have the same thing for all files:
+        # for i in range(nbfibers):
+        #     _stat = statuses[0][i] ## First file status
+        #     _head = headers[0][i]
+        #     _obj = objtype[0][i]
+        #     for j in range(1, len(self.all_list)):
+        #         if statuses[j][i]!=_stat:
+        #             raise Exception('gen_plugmap: inconsistency in status headers')
+        #         if headers[j][i]!=_head:
+        #             raise Exception('gen_plugmap: inconsistency in status headers')
+        #         if objtype[j][i]!=_obj:
+        #             raise Exception('gen_plugmap: inconsistency in status headers')
+        #
+        fdump.check_headers(nbfibers, self.ccd, self.all_list, self.filedict)
+        # identifiers, headers, objtype = fdump.gen_plugmap(self.filedict[(self.ccd, self.all_list[0])])
+        plugmapdic = fdump.gen_plugmap(self.filedict[(self.ccd, self.all_list[0])])
 
-        ## We then take the first file headers: 
-        objtype = objtype[0]
-        identifiers = statuses[0]
+        apertures, identifiers, objtypes = fdump.order_fibers(plugmapdic, self.ccd, self.filter)
 
-        objtype = np.array(objtype)[::-1]
-        identifiers = np.array(identifiers)[::-1]
-        nobjtype = np.copy(objtype)
-        for i in range(1, len(objtype)):
-            if (objtype[i]=='unused') & (objtype[i-1]!='unused'):
-                nobjtype[i] = objtype[i-1]
-        objtype = nobjtype
-        objcol = fits.Column(name='OBJTYPE',format='A6',array=objtype)
-        apcol = fits.Column(name='APERTURE',format='I',array=np.arange(nbfibers)+1)
+        objcol = fits.Column(name='OBJTYPE',format='A6',array=objtypes)
+        apcol = fits.Column(name='APERTURE',format='I',array=apertures)
         cols=fits.ColDefs([objcol, apcol])
         plugmap_table_hdu=fits.FITS_rec.from_columns(cols)
+
+        # ## We then take the first file headers: 
+        # objtype
+        # identifiers = statuses[0]
+        from IPython import embed
+        embed()
+
+        # objtype = np.array(objtype)[::-1]
+        # identifiers = np.array(identifiers)[::-1]
+        # nobjtype = np.copy(objtype)
+        # for i in range(1, len(objtype)):
+        #     if (objtype[i]=='unused') & (objtype[i-1]!='unused'):
+        #         nobjtype[i] = objtype[i-1]
+        # objtype = nobjtype
+        # objcol = fits.Column(name='OBJTYPE',format='A6',array=objtype)
+        # apcol = fits.Column(name='APERTURE',format='I',array=np.arange(nbfibers)+1)
+        # expid = fits.Column(name='EXPID',format='A100',array=identifiers)
+        # cols=fits.ColDefs([expid, objcol, apcol])
+        # plugmap_table_hdu=fits.FITS_rec.from_columns(cols)
 
         pickle.dump(plugmap_table_hdu, open(self.plugmap_file,'wb'))
 
         plugstring = ""
-        for i in range(len(objtype)):
-            plugstring += "{:2} {:10} {:10}\n".format(i+1, objtype[i], identifiers[i])
+        for i in range(len(objtypes)):
+            plugstring += "{:2} {:10} {:10}\n".format(i+1, objtypes[i], identifiers[i])
         f = open(self.plugmap_txtfile, 'w')
         f.write(plugstring)
         f.close()
-        # from IPython import embed
-        # embed()
+
         return plugmap_table_hdu
 
     def gen_plugmap2(self):
