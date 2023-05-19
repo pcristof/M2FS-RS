@@ -2786,6 +2786,53 @@ def order_halphali(plugmapdic, cassettes_order):
     
     return apertures, identifiers, objtypes
 
+def order_dupreeblue(plugmapdic, cassettes_order):
+    '''Function to order the dupreeblue filter.
+    The order has 4 NON-consecutive orders (in practive more, things are messed up,
+    but we can used one side of the image to try to count 128.'''
+
+    objtypes = []
+    apertures = []
+    identifiers = []
+    fibers = []
+
+    aperture=1 ## We're gonna count the apertures
+    for cassette in cassettes_order:
+        for fibernb in range(16, 0, -2): ## from top to botton, for both ccd is the same
+            if 'unused' in plugmapdic[cassette][fibernb]['objtype']: continue
+            for order in range(4,0,-1):
+                # First order, first fiber
+                apertures.append(aperture)
+                objtypes.append(plugmapdic[cassette][fibernb]['objtype'])
+                identifiers.append(plugmapdic[cassette][fibernb]['identifier'])
+                fibers.append('FIBER{}{:02d}{}'.format(cassette, fibernb, order))
+                aperture+=1
+                # First order, second fiber
+                apertures.append(aperture)
+                objtypes.append(plugmapdic[cassette][fibernb-1]['objtype'])
+                identifiers.append(plugmapdic[cassette][fibernb-1]['identifier'])
+                fibers.append('FIBER{}{:02d}{}'.format(cassette, fibernb-1, order))
+                aperture+=1
+
+    ## We may be having less than 128 apertures, and yet, our program currently needs 128
+    ## For now I "complete" the missing apertures to reach 128. In the future we could
+    ## Try to do things in a more clever way?
+    ## I am still confused by this 128 number - I can't quite understand if that's an absolute
+    ## maximum, since I see many more with the blue filter. And with Novembder Halpha-Li data
+    ## We have only 120 plugged fibers, but still 128 traces...
+
+    # from IPython import embed
+    # embed()
+
+    while len(fibers)<128: 
+        apertures.append(aperture)
+        objtypes.append('UNUSED')
+        identifiers.append('')
+        fibers.append('FIBER{}{:02d}'.format(cassette, fibernb))
+        aperture+=1
+    
+    return apertures, identifiers, objtypes
+
 def order_fibers(plugmapdic, ccd, filter):
     '''Function to order the fiber based on filter and CCD'''
     
@@ -2796,6 +2843,8 @@ def order_fibers(plugmapdic, ccd, filter):
     
     if 'halphali' in filter:
         apertures, identifiers, objtypes = order_halphali(plugmapdic, cassettes_order)
+    elif 'dupreeblue' in filter:
+        apertures, identifiers, objtypes = order_dupreeblue(plugmapdic, cassettes_order)
     else:
         raise Exception('function_dump.order_fibers: unkwnown filter')
     return apertures, identifiers, objtypes

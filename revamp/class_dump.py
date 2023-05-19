@@ -131,6 +131,7 @@ class ReduceM2FS:
 
         self.binning = [2,2] ## Default binning
         self.filter = 'halphali' ## Will ignore - _ spaces and caps 
+        self.filter = 'dupreeblue' ## Will ignore - _ spaces and caps 
 
     ## Setters
     def set_datapath(self, datapath):
@@ -492,8 +493,8 @@ class ReduceM2FS:
         # ## We then take the first file headers: 
         # objtype
         # identifiers = statuses[0]
-        from IPython import embed
-        embed()
+        # from IPython import embed
+        # embed()
 
         # objtype = np.array(objtype)[::-1]
         # identifiers = np.array(identifiers)[::-1]
