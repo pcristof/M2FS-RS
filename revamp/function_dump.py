@@ -1393,9 +1393,9 @@ def get_meansky(throughputcorr_array,wavcal_array,plugmap):
                 #################################################
                 #################################################
                 if len(wav)>0:
-                    sky_flux_array.append(np.interp(wav0,wav,throughputcorr_array[skies[i]].spec1d_flux))
-                    sky_err_array.append(np.interp(wav0,wav,throughputcorr_array[skies[i]].spec1d_uncertainty.quantity.value))
-                    sky_mask_array.append(np.interp(wav0,wav,throughputcorr_array[skies[i]].spec1d_mask))
+                    sky_flux_array.append(fftinterp(wav0,wav,throughputcorr_array[skies[i]].spec1d_flux))
+                    sky_err_array.append(fftinterp(wav0,wav,throughputcorr_array[skies[i]].spec1d_uncertainty.quantity.value))
+                    sky_mask_array.append(fftinterp(wav0,wav,throughputcorr_array[skies[i]].spec1d_mask))
             sky_flux_array=np.array(sky_flux_array)
             sky_err_array=np.array(sky_err_array)
             sky_mask_array=np.array(sky_mask_array)
@@ -1882,9 +1882,11 @@ def get_skysubtract(meansky,i,throughputcorr_array,wavcal_array, normalized=Fals
     skysubtract0.mask=np.full(len(skysubtract0.flux),True,dtype=bool)
 
     if len(wav)>0:
-        sky_flux=np.interp(wav,wav0,meansky.flux)
-        sky_err=np.interp(wav,wav0,meansky.uncertainty.quantity.value)
-        sky_mask=np.interp(wav,wav0,meansky.mask)
+        # from IPython import embed
+        # embed()
+        sky_flux=fftinterp(wav,wav0,meansky.flux)
+        sky_err=fftinterp(wav,wav0,meansky.uncertainty.quantity.value)
+        sky_mask=fftinterp(wav,wav0,meansky.mask)
         sky0=Spectrum1D(spectral_axis=throughputcorr_array[i].spec1d_pixel*u.AA,flux=sky_flux,uncertainty=StdDevUncertainty(sky_err),mask=sky_mask)
         
         continuum0,rms0=get_continuum(sky0,-5,1,10,10)
@@ -2011,7 +2013,7 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
                 xscale=(x0-pixel0_template)/pixelscale_template
                 x1=q[1]*pixelscale_template+x0*(1.+np.polynomial.polynomial.polyval(xscale,q[2:]))
                 # x1=q[1]*pixelscale_template+x0*(1.+np.polynomial.chebyshev.chebval(xscale,q[2:]))
-                interp=q[0]*np.interp(spec_contsub.spectral_axis.value[use],x1,y0)
+                interp=q[0]*fftinterp(spec_contsub.spectral_axis.value[use],x1,y0)
                 return interp
 
             def my_func(q):#spec_contsub,spec_contsub_template,use,use_template,pixel0_template,pixelscale_template):
@@ -2054,7 +2056,7 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
             #        sampler=NestedSampler(loglike,ptform,ndim,bound='multi')
             dsampler.run_nested(maxcall=12000)
             #        sampler.run_nested(dlogz=0.05)
-            
+
             ## Where is the dsampler maximal? 
             best=np.where(dsampler.results.logl==np.max(dsampler.results.logl))[0][0]
 #        best=np.where(sampler.results.logl==np.max(sampler.results.logl))[0][0]
@@ -2358,7 +2360,7 @@ def get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap,m2fsrun,field
                         dpix=np.max([thar[j][this[0]].fit_lines.fit[q].mean.value for q in keep])-np.min([thar[j][this[0]].fit_lines.fit[q].mean.value for q in keep])
                         central_wavelength=np.min(linelist.wavelength)+(np.max(linelist.wavelength)-np.min(linelist.wavelength))/2.
 #                        x=[thar[j][this[0]].fit_lines.fit[q].mean.value for q in keep]
-                        thar_resolution0=thar[j][this[0]].resolution(np.interp(x=central_wavelength,xp=[thar[j][this[0]].wav[q] for q in keep],fp=[thar[j][this[0]].fit_lines.fit[q].mean.value for q in keep]))*dwav/dpix
+                        thar_resolution0=thar[j][this[0]].resolution(fftinterp(x=central_wavelength,xp=[thar[j][this[0]].wav[q] for q in keep],fp=[thar[j][this[0]].fit_lines.fit[q].mean.value for q in keep]))*dwav/dpix
                         thar_wav_min0=np.min(np.ma.compressed(thar[j][this[0]].wav))
                         thar_wav_max0=np.max(np.ma.compressed(thar[j][this[0]].wav))
 
@@ -2530,8 +2532,8 @@ def get_aperture_fast(j,columnspec_array,apertures_profile_middle,middle_column,
     trace_pix_min=[]
     trace_pix_max=[]
     for i in range(0,len(trace_x)):
-        trace_pix_min.append(np.interp(x=trace_y[i],xp=[image_boundary.lower[q][1] for q in range(0,len(image_boundary.lower))],fp=[image_boundary.lower[q][0] for q in range(0,len(image_boundary.lower))]))
-        trace_pix_max.append(np.interp(x=trace_y[i],xp=[image_boundary.upper[q][1] for q in range(0,len(image_boundary.upper))],fp=[image_boundary.upper[q][0] for q in range(0,len(image_boundary.upper))]))
+        trace_pix_min.append(fftinterp(x=trace_y[i],xp=[image_boundary.lower[q][1] for q in range(0,len(image_boundary.lower))],fp=[image_boundary.lower[q][0] for q in range(0,len(image_boundary.lower))]))
+        trace_pix_max.append(fftinterp(x=trace_y[i],xp=[image_boundary.upper[q][1] for q in range(0,len(image_boundary.upper))],fp=[image_boundary.upper[q][0] for q in range(0,len(image_boundary.upper))]))
     trace_pix_min=np.array(trace_pix_min)
     trace_pix_max=np.array(trace_pix_max)
 
@@ -2848,3 +2850,34 @@ def order_fibers(plugmapdic, ccd, filter):
     else:
         raise Exception('function_dump.order_fibers: unkwnown filter')
     return apertures, identifiers, objtypes
+
+
+#### Two functions here to perform a fourier interpolation
+from scipy.signal import resample
+def xresample(x, y, factor=4):
+    ny = resample(y, factor*len(y)) ## Oversampled array
+    ny = ny[:-factor+1] ## Remove ending
+    #
+    xx = np.linspace(0, len(x)-1, factor*len(x)-factor+1) ## Build x array
+    nx = np.interp(xx, np.arange(len(x)), x) ## interpolate wavelength solution
+    #
+    return nx, ny
+
+def fftinterp(x, xp, fp, factor=4):
+    '''Function to perform Fourrier interpolation of the
+    data. The fuction relied on scipy.signal ressample.
+    It assumed an array evenly spaced in bins, and estimate
+    the wavelength solution associated by performing a linear
+    interpolation of the wavelength solution.
+    The syntax was adapted to make sure it can replace the np.interp
+    function.'''
+    ## Trying to retain the astropy quantity type.
+    mytype = type(fp)
+    if mytype==astropy.units.quantity.Quantity:
+        myunit = fp.unit
+    else:
+        myunit=1
+    #
+    _x, _y = xresample(xp, fp, factor=factor)
+    res = np.interp(x, _x, _y)
+    return res*myunit ## Should allow converting to quantity
