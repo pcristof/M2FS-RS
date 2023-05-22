@@ -172,7 +172,7 @@ class ReduceM2FS:
 
     def check_data(self):
         '''Function to check that the files input frames exist, are not corrupted, 
-        and that their dimensions match. Also update the binning attributes to that
+        and that their dimensions match. Also updates the binning attributes to that
         the program can automatically handle different binnings.'''
         inidims=[0,0]
         ccd = self.ccd
@@ -189,7 +189,8 @@ class ReduceM2FS:
                 if ndims != inidims:
                     raise Exception('Binning inconsistent for file: '+_fname)
         #
-        self.set_binning(inidims)
+        print("Binning detected to be: {}".format(inidims))
+        self.set_binning(np.array(inidims))
     
     def read_data(self):
         if self.filename is None:

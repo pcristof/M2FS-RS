@@ -19,8 +19,8 @@ def zero_corr(filedict, color, ccd, bias_list, outfile, binning):
     to fits files. It is a revamped version of the m2fs_zero_jan20.py script.
     There are still a lot of hardcoded stuff that should really not be.'''
 
-    revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
-
+    # revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
+    revbin = binning
     obs_readnoise=[]
     master_processed=[]
     sig_master_processed=[]
@@ -99,7 +99,8 @@ def dark_corr(filedict, color, ccd, dark_list, masterbiasfile, outfile, binning)
     to fits files. It is a revamped version of the m2fs_zero_jan20.py script.
     There are still a lot of hardcoded stuff that should really not be.'''
 
-    revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
+    # revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
+    revbin = binning
 
     master_bias=astropy.nddata.CCDData.read(masterbiasfile)
 
@@ -145,7 +146,8 @@ def dark_corr(filedict, color, ccd, dark_list, masterbiasfile, outfile, binning)
 def stitch_frames_nocorr(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes, filedict, binning):
     # for filename in framelist:
     # for file_id in all_list:
-    revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
+    # revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
+    revbin = binning
     for tile in np.arange(1, 5):
         filename = rawfiledict[(ccd, tile, file_id)]
         masterbiasfile = masterbiasframes[(ccd, tile)]
@@ -233,8 +235,8 @@ def stitch_frames_nocorr(ccd, file_id, rawfiledict, masterbiasframes, masterdark
 def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes, filedict, binning):
     # for filename in framelist:
     # for file_id in all_list:
-    revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
-
+    # revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
+    revbin = binning
     for tile in np.arange(1, 5):
         filename = rawfiledict[(ccd, tile, file_id)]
         masterbiasfile = masterbiasframes[(ccd, tile)]
