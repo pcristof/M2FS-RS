@@ -1073,9 +1073,13 @@ def peak_finder(y):
     
     ## Let's try interpolating to be more accurate
     x = np.arange(len(ny))
-    f = interp1d(x, ny, kind='quadratic')
-    nx = np.linspace(0, len(ny)-1, 100*len(ny))
-    ny = f(nx)
+    # f = interp1d(x, ny, kind='quadratic')
+    # nx = np.linspace(0, len(ny)-1, 100*len(ny))
+    # ny = f(nx)
+    nx, ny = xresample(x, ny, 100)
+
+    ## Implement a threshold for the detection
+    ny[ny<np.max(ny)/20] = 0
 
     medy = np.median(ny)
     mask = ny<medy
@@ -1090,12 +1094,28 @@ def peak_finder(y):
     nidx = idx[0]+1
     # x[nidx-1] - x[nidx]
 
+    diffnidx = np.diff(nx[nidx])
+
+    issuewith = np.where(diffnidx<2)[0]
+    if len(issuewith)>0:
+        for ii in issuewith[::-1]:
+            iii = nidx[ii]
+            iiii = nidx[ii+1]
+            if ny[iiii]>ny[iii]: todelete=ii
+            if ny[iiii]<=ny[iii]: todelete=ii+1
+            nidx = np.delete(nidx, todelete)
+
+    # from IPython import embed
+    # embed()
+
     # plt.figure()
     # plt.plot(np.arange(len(y)), y)
     # plt.plot(nx, ny, ',')
     # for i in range(len(nidx)):
     #     plt.axvline(nx[nidx[i]])
     # plt.show()
+
+
 
     return nx[nidx], ny[nidx]
 
