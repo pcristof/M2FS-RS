@@ -191,6 +191,9 @@ class ReduceM2FS:
         #
         print("Binning detected to be: {}".format(inidims))
         self.set_binning(np.array(inidims))
+        _fname = self.rawfiledict[(ccd, tile, self.sci_list[0])]
+        filter = fits.getheader(_fname)['filter'].replace('_', '').lower()
+        self.set_filter(filter)
     
     def read_data(self):
         if self.filename is None:
@@ -670,8 +673,9 @@ class ReduceM2FS:
         ## This is completely dumb, but for now I have to bypass the code before in order to 
         ## set the middle column to something else. This means that I have to restart the find
         ## every time I run this function.
-        # middle_column=np.long(len(columnspec_array)/4)
-        # apertures_profile_middle=columnspec_array[middle_column].apertures_profile
+        middle_column=np.long(len(columnspec_array)/4)
+        print('We are working on the middle_column: {}'.format(middle_column*self.trace_step))
+        apertures_profile_middle=columnspec_array[middle_column].apertures_profile
 
         apertures_profile_middle=fdump.fiddle_apertures(columnspec_array,middle_column,
                                                         self.window, apertures_profile_middle,

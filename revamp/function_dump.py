@@ -2870,7 +2870,7 @@ def order_fibers(plugmapdic, ccd, filter):
     elif 'dupreeblue' in filter:
         apertures, identifiers, objtypes = order_dupreeblue(plugmapdic, cassettes_order)
     else:
-        raise Exception('function_dump.order_fibers: unkwnown filter')
+        raise Exception('function_dump.order_fibers: unknown filter, try options: {} | {}'.format('halphali', 'dupreeblue'))
     return apertures, identifiers, objtypes
 
 
