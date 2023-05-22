@@ -453,11 +453,12 @@ class ReduceM2FS:
     ########################################
     ########################################
 
-    def gen_plugmap(self):
+    def gen_plugmap(self, filename=None):
         '''Function to read the fits header a build a plug map.
         The function will check all the fits headers for inconsistencies.
         For now we only check the ThAr, LED, and Science frames.
         '''
+        filename = filename.strip()
         nbfibers = 128 # this is the number of fibers we should have. TODO make this an attribute
         # statuses = []
         # headers = []
@@ -485,7 +486,10 @@ class ReduceM2FS:
         #
         fdump.check_headers(nbfibers, self.ccd, self.all_list, self.filedict)
         # identifiers, headers, objtype = fdump.gen_plugmap(self.filedict[(self.ccd, self.all_list[0])])
-        plugmapdic = fdump.gen_plugmap(self.filedict[(self.ccd, self.all_list[0])])
+        if filename is not None:
+            plugmapdic = fdump.gen_plugmap_from_file(filename, self.ccd)
+        else:
+            plugmapdic = fdump.gen_plugmap(self.filedict[(self.ccd, self.all_list[0])])
 
         apertures, identifiers, objtypes = fdump.order_fibers(plugmapdic, self.ccd, self.filter)
 

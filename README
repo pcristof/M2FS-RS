@@ -15,6 +15,11 @@ NB: Right now several quantities are initiliazed in the object. These should rat
 
 Example, notebook, manual to come.
 
+KNOWN ISSUES:
+- Throughput correction and twightlight stacking not yet finished.
+
+----- OLD README BY M. WALKER ------
+
 
 m2fs_zero_jan20.py
 m2fs_dark.py

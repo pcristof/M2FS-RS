@@ -2768,6 +2768,39 @@ def gen_plugmap(filename):
 
     return plugmapdic #ids, headers, objtype
 
+def gen_plugmap_from_file(filename, ccd):
+    '''Function to read the fits header a build a plug map.
+    The function will check all the fits headers for inconsistencies.
+    For now we only check the ThAr, LED, and Science frames.
+    '''     
+    ids = []
+    headers = []
+    objtype = []
+
+    f = open(filename, 'r')
+    for line in f.readlines():
+        fiber = line.split()[0].lower()
+        stat = line.split()[1]
+        if ccd not in fiber: continue
+        headers.append(fiber.replace(ccd, 'FIBER').replace('-', '')) ## This is just formating  
+        ids.append(stat)
+        if 'unplug' in stat.lower():
+            objtype.append('unused')
+        elif 'sky' in stat.lower():
+            objtype.append('SKY')
+        else:
+            objtype.append('TARGET')
+    f.close()
+
+    plugmapdic = {1:{}, 2:{}, 3:{}, 4:{}, 5:{}, 6:{}, 7:{}, 8:{}} ## Initialize cassettes dics
+    for i in range(len(headers)):
+        fiberstring = headers[i].replace('FIBER', '')
+        cassette = int(float(fiberstring[0])) ## This is the cassette number
+        fibernb = int(float(fiberstring[1:])) ## This is the fiber number
+        plugmapdic[cassette][fibernb] = {'objtype': objtype[i], 'identifier': ids[i]}
+
+    return plugmapdic #ids, headers, objtype
+
 def order_halphali(plugmapdic, cassettes_order):
     '''Function to orde the Halpha-Li filter.
     The order has two consecutive orders.'''
