@@ -458,7 +458,8 @@ class ReduceM2FS:
         The function will check all the fits headers for inconsistencies.
         For now we only check the ThAr, LED, and Science frames.
         '''
-        filename = filename.strip()
+        if filename is not None:
+            filename = filename.strip()
         nbfibers = 128 # this is the number of fibers we should have. TODO make this an attribute
         # statuses = []
         # headers = []
