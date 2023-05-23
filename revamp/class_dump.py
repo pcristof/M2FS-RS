@@ -30,6 +30,9 @@ TODO:
 -   When checking if file exsists, there is a lot of code that is simply 
     repeated. Need a clean up.
 -   Implement multiple filter handling in id_lines_translate? See docstring for the function
+-   Some files may be corrupted and therefore unreadable. Add a check in check_data to list
+    the corrupted files, remove them from the initial arrays, and check taht we have at least
+    one science, one thar, one led, one bias and one dark.
 '''
 
 
@@ -181,7 +184,10 @@ class ReduceM2FS:
                 _fname = self.rawfiledict[(ccd, tile, fileoro)]
                 if not os.path.isfile(_fname):
                     raise Exception('File not found: '+_fname)
-                data = fits.getdata(_fname)
+                try:
+                    data = fits.getdata(_fname)
+                except:
+                    raise Exception('Could not read {}'.format(_fname))
                 datadims = np.shape(data)
                 ndims = [int(round(datadims[0]/1000)), int(round(datadims[1]/1000))]
                 if inidims==[0,0]: inidims = ndims
@@ -667,7 +673,7 @@ class ReduceM2FS:
         apertures_profile_middle_exists=path.exists(apertures_profile_middle_file) # Exists?
 
         if((apertures_profile_middle_exists)&(self.overwrite)):
-            print('loading existing '+apertures_profile_middle_file+', will overwrite')
+            # print('loading existing '+apertures_profile_middle_file+', will overwrite')
             apertures_profile_middle,middle_column=pickle.load(open(apertures_profile_middle_file,'rb'))
         elif(not(apertures_profile_middle_exists)):
             middle_column=np.long(len(columnspec_array)/2)
@@ -685,15 +691,20 @@ class ReduceM2FS:
         apertures_profile_middle=fdump.fiddle_apertures(columnspec_array,middle_column,
                                                         self.window, apertures_profile_middle,
                                                         'dummy.txt')
-        pickle.dump([apertures_profile_middle,middle_column],open(apertures_profile_middle_file,'wb'))#save pickle to file
-        
-        # from IPython import embed
-        # embed()
-        realvirtualarray = np.array(apertures_profile_middle.realvirtual)
-        f = open(self.outpath + 'real-virtual-array.txt', 'w')
-        for i in range(len(realvirtualarray)):
-            f.write("{}\n".format(int(float(realvirtualarray[i]))))
-        f.close()
+
+        if((not apertures_profile_middle_exists)|(self.overwrite)):
+            print('find() -> Overwriting {}'.format(apertures_profile_middle_file))
+            pickle.dump([apertures_profile_middle,middle_column],open(apertures_profile_middle_file,'wb'))#save pickle to file
+                
+            # from IPython import embed
+            # embed()
+            realvirtualarray = np.array(apertures_profile_middle.realvirtual)
+            f = open(self.outpath + 'real-virtual-array.txt', 'w')
+            for i in range(len(realvirtualarray)):
+                f.write("{}\n".format(int(float(realvirtualarray[i]))))
+            f.close()
+        else:
+            print('find() -> No overwriting.')
 
         '''
         apertures_profile_middle object contains: 

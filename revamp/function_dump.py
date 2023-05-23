@@ -554,7 +554,7 @@ def on_key_id_lines(event,args_list):
     from astropy.modeling import models,fitting
     from copy import deepcopy
 
-    print('you pressed ',event.key)
+    #print('you pressed ',event.key)
 
     global id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints
     extract1d,continuum,fit_lines,linelist,line_centers,id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints,id_lines_tol_angs,fig=args_list
@@ -710,6 +710,7 @@ def fiddle_apertures(columnspec_array,column,window,apertures,find_apertures_fil
     print('press \'j\' to iteratively fit all the odd apertures \n')
     print('press \'p\' to iteratively mark all apertures as phantom \n')
     print('press \'k\' to iteratively fit the n apertures starting at i \n')
+    print('press \'K\' same as key but with positions from initial guess \n')
     print('press \'d\' to delete aperture nearest cursor \n')
     print('press \'e\' to delete all apertures \n')
     print('press \'n\' to add new real aperture at cursor position \n')
@@ -737,7 +738,7 @@ def on_key_find(event,args_list):
 
     print('you pressed ', event.key)
 
-    keyoptions = ['z', 'd', 'e', 'n', 'a', 'q', 'r', 'g', 'h', 'j', 'p', 'c', 'k']
+    keyoptions = ['z', 'd', 'e', 'n', 'a', 'q', 'r', 'g', 'h', 'j', 'p', 'c', 'k', 'K']
 
     global columnspec_array,column,subregion,fit,realvirtual,initial,window
     columnspec_array,column,subregion,fit,realvirtual,initial,window,fig=args_list
@@ -971,6 +972,72 @@ def on_key_find(event,args_list):
             print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100))
             subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
 
+        if event.key=='K':
+            ini = input('Start at aperture i. Enter i: ')
+            nap = input('fit every n apertures. Enter n: ')
+            csa = input('how many consecutive apertures (default=1). Enter n: ')
+            nap = int(float(nap))
+            ini = int(float(ini)-1)
+            if csa.isnumeric():
+                csa = int(float(csa))
+            else:
+                csa = 1
+            ## PIC: First delete everything:
+            aperture_centers=[fit[q].mean for q in range(0,len(fit))]
+            mycenters = np.array([int(fit[q].mean.value) for q in range(0,len(fit))]) 
+            print('deleting all apertures ')
+            for q in range(0,len(subregion)):
+                del(subregion[len(subregion)-1])
+            for q in range(0,len(fit)):
+                del(fit[len(fit)-1])
+            for q in range(0,len(realvirtual)):
+                del(realvirtual[len(realvirtual)-1])
+            for q in range(0,len(initial)):
+                del(initial[len(initial)-1])
+            # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+            ## PIC: Iterate through everything:
+            specarray = columnspec_array[column].spec ## That's the think we plot
+            idx, _ = peak_finder(specarray)
+            ## Take the closest to those initially found
+            mynewidx = np.copy(idx)
+            for ii in range(len(mycenters)):
+                res = (mycenters[ii]-idx)**2
+                position = np.where(res==np.min(res))[0][0]
+                mynewidx[ii] = idx[position]
+            idx = np.copy(mynewidx)
+            idx = np.copy(mycenters)
+            ntot = len(idx)
+            allowed_apertures = []
+            for iii in range(150):
+                for _csa in range(1, csa+1):
+                    allowed_apertures.append(ini+_csa-1+nap*iii)
+            for ieventxdata, enventxdata in enumerate(idx):
+                print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
+                if ieventxdata in allowed_apertures:
+                    new_center=np.float(enventxdata)
+                    x_center=new_center
+                    spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
+                    subregion0,fit0=m2fs.fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+                    subregion.append(subregion0)
+                    fit.append(fit0)
+                    realvirtual.append(True)
+                    initial.append(False)
+                    # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+                else:
+                    new_center=np.float(enventxdata)
+                    x_center=new_center
+                    val1=x_center-window/2.
+                    val2=x_center+window/2.
+                    subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
+                    aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+                    halfwindow=window/2.
+                    fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
+                    realvirtual.append(False)
+                    initial.append(False)
+                    # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
+            print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100))
+            subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
+
 
         if event.key=='p':
             ## PIC: First delete everything:
@@ -1079,10 +1146,11 @@ def peak_finder(y):
     nx, ny = xresample(x, ny, 100)
 
     ## Implement a threshold for the detection
-    ny[ny<np.max(ny)/20] = 0
+    # ny[ny<np.max(ny)/200] = 0
+    # ny[ny<70] = 0
 
     medy = np.median(ny)
-    mask = ny<medy
+    mask = ny<medy+medy/2
     # nx[nx<medx] = 0
 
     diffs = np.diff(ny)
@@ -1201,7 +1269,7 @@ def on_key_id_lines(event,args_list):
     from astropy.modeling import models,fitting
     from copy import deepcopy
 
-    print('you pressed ',event.key)
+    #print('you pressed ',event.key)
 
     keyoptions = ['.', 'm', 'd', 'o', 'r', 't', 'z', 'g', 'l', 'q']
 
