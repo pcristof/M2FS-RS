@@ -95,7 +95,7 @@ class ReduceM2FS:
         self.scatteredlightcorr_order = 4
         self.scatteredlightcorr_rejection_iterations = 10
         self.scatteredlightcorr_rejection_sigma = 3.
-        self.extract1d_aperture_width = 3. #maximum (half-)width of aperture for extraction (too large and we get weird edge effects)
+        self.extract1d_aperture_width = 5. # 3. #maximum (half-)width of aperture for extraction (too large and we get weird edge effects)
         self.resolution_order = 1
         self.resolution_rejection_iteration = 10
         self.id_lines_continuum_rejection_sigma = 3.
@@ -105,7 +105,7 @@ class ReduceM2FS:
         self.id_lines_continuum_rejection_high = 1.
         self.id_lines_continuum_rejection_iterations = 10 #number of iterations of outlier rejection for fitting "continuum"
         self.id_lines_continuum_rejection_order = 10
-        self.id_lines_threshold_factor = 100 # default was 10. Threshold to id lines based on continuum?
+        self.id_lines_threshold_factor = 50 # default was 10. Threshold to id lines based on continuum?
         self.id_lines_window = 5.
         self.id_lines_order = 5
         self.id_lines_tol_pix = 2. #tolerance for matching lines between template and new spectrum (pixels)
@@ -135,6 +135,8 @@ class ReduceM2FS:
         self.binning = [2,2] ## Default binning
         self.filter = 'halphali' ## Will ignore - _ spaces and caps 
         self.filter = 'dupreeblue' ## Will ignore - _ spaces and caps 
+        
+        self.corrdark = False ## trigger to correct the dark from the science frames
 
     ## Setters
     def set_datapath(self, datapath):
@@ -449,7 +451,7 @@ class ReduceM2FS:
         ## For each file name, and for the global ccd, we combine the tiles.
         for file_id in self.all_list:
             fdump.stitch_frames(self.ccd, file_id, self.rawfiledict, self.masterbiasframes, 
-                                self.masterdarkframes, self.filedict, self.binning)   
+                                self.masterdarkframes, self.filedict, self.binning, self.corrdark)   
     def stitch_frames_nocorr(self):
         ## For each file name, and for the global ccd, we combine the tiles.
         for file_id in self.all_list:
@@ -1788,7 +1790,7 @@ class ReduceM2FS:
 
         temperature=np.array(temperature,dtype='str')
 
-        new_hdul=m2fs.get_hdul(data,stack_array,sky_array,stack_wavcal_array,
+        new_hdul=fdump.get_hdul(data,stack_array,sky_array,stack_wavcal_array,
                                plugmap0,m2fsrun,field_name,thar,temperature,
                                aperture_array, linelist)
 #                hjdstring=str(round(new_hdul[5].data['hjd'][0],2))

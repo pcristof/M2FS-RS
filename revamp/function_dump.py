@@ -232,7 +232,7 @@ def stitch_frames_nocorr(ccd, file_id, rawfiledict, masterbiasframes, masterdark
     stitched.write(outfile, overwrite=True)
     print("stitch_frames: Done")
 
-def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes, filedict, binning):
+def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes, filedict, binning, corrdark=False):
     # for filename in framelist:
     # for file_id in all_list:
     # revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
@@ -255,8 +255,10 @@ def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes,
         trimmed2=ccdproc.trim_image(trimmed1[:revbin[0]*1028,:revbin[1]*1024],add_keyword={'trim2':'Done'})
 
         debiased0=ccdproc.subtract_bias(trimmed2,master_bias)
-        dedark0=ccdproc.subtract_dark(debiased0,master_dark,exposure_time='exptime',exposure_unit=u.second,scale=True,add_keyword={'dark_corr':'Done'})
-
+        if corrdark:
+            dedark0=ccdproc.subtract_dark(debiased0,master_dark,exposure_time='exptime',exposure_unit=u.second,scale=True,add_keyword={'dark_corr':'Done'})
+        else:
+            dedark0 = debiased0
         data_with_deviation=ccdproc.create_deviation(dedark0,gain=data.meta['egain']*u.electron/u.adu,readnoise=obs_readnoise*u.electron)
 
         gain_corrected=ccdproc.gain_correct(data_with_deviation,data_with_deviation.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
@@ -997,7 +999,7 @@ def on_key_find(event,args_list):
             # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
             ## PIC: Iterate through everything:
             specarray = columnspec_array[column].spec ## That's the think we plot
-            idx, _ = peak_finder(specarray)
+            idx, _ = peak_finder(specarray, ths=0, med=0)
             ## Take the closest to those initially found
             mynewidx = np.copy(idx)
             for ii in range(len(mycenters)):
@@ -1133,7 +1135,7 @@ def on_key_find(event,args_list):
 
 from scipy.interpolate import interp1d
 
-def peak_finder(y):
+def peak_finder(y, ths=1/20, med=1):
     '''This function finds the bin corresponding to the maxima in the y array'''
     ny = np.copy(y)
     nx = np.arange(len(y))
@@ -1146,11 +1148,11 @@ def peak_finder(y):
     nx, ny = xresample(x, ny, 100)
 
     ## Implement a threshold for the detection
-    # ny[ny<np.max(ny)/200] = 0
+    ny[ny<np.max(ny)*ths] = 0
     # ny[ny<70] = 0
 
     medy = np.median(ny)
-    mask = ny<medy+medy/2
+    mask = ny<med*medy#+medy/2
     # nx[nx<medx] = 0
 
     diffs = np.diff(ny)
@@ -2530,6 +2532,7 @@ def get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap,m2fsrun,field
 
     if len(skysubtract_array)>0:
         for i in range(0,len(plugmap)):
+            print(i)
             this=np.where(np.array([skysubtract_array[q].aperture for q in range(0,len(skysubtract_array))])==plugmap['aperture'][i])[0]
             if len(this)>0:
                 mask0=deepcopy(skysubtract_array[this[0]].spec1d_mask)
@@ -2539,17 +2542,24 @@ def get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap,m2fsrun,field
                     best2=np.where(spec_range==np.min(spec_range))[0][0]
                     if thar_npoints_array[i][best[best2]]==0:
                         print(thar_npoints_array[i],this,wavcal_array[this[0]].wav)
-                        np.pause()
+                        # from IPython import embed
+                        # embed()
+                        # np.pause()
+                        ## If we reach this point, that means we had a problem with the calibration. 
+                        ## It could be an 'unused' aperture? It is not.
+                        ## Just mask everything
+                        new_mask = np.arange(len(mask0))
 #                    if thar_npoints_array[i][best[best2]]>0:###why are there unmasked cases where thar_npoints=0 and/or wavcal.wav=[]
 #                        if len(wavcal_array[this[0]].wav)>0:
-                    extra=(thar_wav_max_array[i][best[best2]]-thar_wav_min_array[i][best[best2]])/np.float(thar_npoints_array[i][best[best2]])
-                    lambdamin=thar_wav_min_array[i][best[best2]]-extra
-                    lambdamax=thar_wav_max_array[i][best[best2]]+extra
-#                            print(wavcal_array[this[0]].wav)
-                    try:
-                        new_mask=np.where((wavcal_array[this[0]].wav<lambdamin)|(wavcal_array[this[0]].wav>lambdamax))[0]
-                    except:
-                        new_mask = np.arange(len(mask0))
+                    else:
+                        extra=(thar_wav_max_array[i][best[best2]]-thar_wav_min_array[i][best[best2]])/np.float(thar_npoints_array[i][best[best2]])
+                        lambdamin=thar_wav_min_array[i][best[best2]]-extra
+                        lambdamax=thar_wav_max_array[i][best[best2]]+extra
+    #                            print(wavcal_array[this[0]].wav)
+                        try:
+                            new_mask=np.where((wavcal_array[this[0]].wav<lambdamin)|(wavcal_array[this[0]].wav>lambdamax))[0]
+                        except:
+                            new_mask = np.arange(len(mask0))
                     mask0[new_mask]=True
                 data_array.append(skysubtract_array[this[0]].spec1d_flux.value)
                 var_array.append(skysubtract_array[this[0]].spec1d_uncertainty.quantity.value**2)
