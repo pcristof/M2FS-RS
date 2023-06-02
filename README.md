@@ -78,7 +78,6 @@ RM.zero_corr()
 RM.dark_corr()
 RM.stitch_frames()
 ```
-________________________
 - This file takes an input argument, the directory name, and search for it in the inpath directory.
 - The stiched frames will be saved in the tmppath directory
 
