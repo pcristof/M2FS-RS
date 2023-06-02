@@ -2,29 +2,26 @@ The M2FS data reduction package
 Build on a the code of Matthew Walker.
 Revamped by P. I. Cristofari in March/April 2023.
 
-Overal structure:
+#### Overal structure:
 - m2fs_process.py contains functions written by Matthew Walker
 - function_dump.py contains additional functions or modified verisons of the m2fs_process.py functions
 - class_dump.py contains a single class to wrap up the reduction with several methods greatly inspired from Matthew Walkers' initial reduction scripts.
 
 A simple script can be edited to perform the full reduction using the object defined in class_dump.py. An example of such script is reduce.py.
-
 NB: Some of the functions are interactive and will require user inputs. A program could be built upon this script, and a user config file could control the reduction options.
-
 NB: Right now several quantities are initiliazed in the object. These should rather be placed in a configuration file. The config file file should then populate the object attributes.
-
 Example, notebook, manual to come.
 
-KNOWN ISSUES:
+#### KNOWN ISSUES:
 - Throughput correction and twightlight stacking not yet finished.
 
------ QUICK START GUIDE -----
+# ----- QUICK START GUIDE -----
 
 Let us review how to perform a reduction with this pipeline.
 First, we assume that you have a directory containing fits files that look like rxxxxc1.fits, or bxxxxc4.fits, etc. This is the raw data you'll get from M2FS.
 
 $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
-# \[1\] THE FRAMES.LIST FILE
+## \[1\] THE FRAMES.LIST FILE
 The program needs to know which frame number corresponds to what. The code reads and simple text file in order to read this information. Let us name this file frames.list (the name does not matter). Here is an example of how it should be formatted:
 
 ```
