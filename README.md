@@ -1,8 +1,8 @@
-The M2FS data reduction package
-Build on a the code of Matthew Walker.
-Revamped by P. I. Cristofari in March/April 2023.
+# The M2FS data reduction package  
+Build on a the code of Matthew Walker.  
+Revamped by P. I. Cristofari in March/April 2023.  
 
-#### Overal structure:
+#### OVERAL STRUCTURE:
 - m2fs_process.py contains functions written by Matthew Walker
 - function_dump.py contains additional functions or modified verisons of the m2fs_process.py functions
 - class_dump.py contains a single class to wrap up the reduction with several methods greatly inspired from Matthew Walkers' initial reduction scripts.
