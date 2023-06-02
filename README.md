@@ -46,6 +46,7 @@ Once we have this file, we can write a script to perform the reducion. I wrote t
 
 Here is an example of script to perform frame-stiching:
 ________________________
+```
 '''This is an example script meant to reduce a specific night from A to Z for a using the functions
 and objects defined in the directory.
 Should be re-written in the fututre, still just for dev.
@@ -79,6 +80,7 @@ RM.check_data() ## Check that the data exists and that the frames are not corrup
 RM.zero_corr()
 RM.dark_corr()
 RM.stitch_frames()
+```
 ________________________
 - This file takes an input argument, the directory name, and search for it in the inpath directory.
 - The stiched frames will be saved in the tmppath directory
