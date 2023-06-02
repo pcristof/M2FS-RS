@@ -158,7 +158,7 @@ RM.writefits()
 - This script takes as arguments the directory name and the ccd (r or b)
 - The script will need a wavelength calibration line list, here thar-linelist-2.txt.
 
-IMPORTANT NOTE: A great number of parameters can be tuned for this reduction. They are currently hardcoded in the class_dump.py file, in the constructor __init__. In the future they will stored in a seperate configuration file.
+IMPORTANT NOTE: A great number of parameters can be tuned for this reduction. They are currently hardcoded in the class_dump.py file, in the constructor \_\_init\_\_. In the future they will stored in a seperate configuration file.
 
 # ----- OLD README BY M. WALKER ------
 
