@@ -136,6 +136,7 @@ class ReduceM2FS:
         self.filter = 'halphali' ## Will ignore - _ spaces and caps 
         self.filter = 'dupreeblue' ## Will ignore - _ spaces and caps 
         
+        self.sky_subtracted = False ## Informs us on whether the data was sky subtracted.
         self.corrdark = False ## trigger to correct the dark from the science frames
 
     ## Setters
@@ -1617,6 +1618,7 @@ class ReduceM2FS:
                 pickle.dump(sky_array,open(sky_array_file,'wb'))
                 pickle.dump(skysubtract_array,open(skysubtract_array_file,'wb'))
                 pickle.dump(continuum, open(continuum_array_file, 'wb'))
+                self.sky_subtracted = True
                 print('skysubstract: Done')
 
     def _stack_frames(self, kind='skycorr'):
@@ -1709,7 +1711,8 @@ class ReduceM2FS:
             pickle.dump(stack_array, open(stack_array_file,'wb'))#save pickle to file
 
     def stack_frames(self):
-        self._stack_frames('skycorr')
+        if self.sky_subtracted is True:
+            self._stack_frames('skycorr')
         self._stack_frames('raw')
     
     def _writefits(self, kind='sky'):
@@ -1765,7 +1768,10 @@ class ReduceM2FS:
 
             wavcal_array=pickle.load(open(wavcal_array_file,'rb'))
             skysubtract_array=pickle.load(open(skysubtract_array_file,'rb'))
-            sky_array=pickle.load(open(sky_array_file,'rb'))
+            if 'sky' in kind:
+                sky_array=pickle.load(open(sky_array_file,'rb'))
+            else:
+                sky_array = [skysubtract_array[i] for i in range(len(skysubtract_array))]
             plugmap0=pickle.load(open(plugmap_file,'rb'))
             m2fsrun = 'dummy'
             field_name = "dummy"
@@ -1841,7 +1847,8 @@ class ReduceM2FS:
             new_hdul.writeto(stack_fits_file,overwrite=True)
 
     def writefits(self):
-        self._writefits('sky')
+        if self.sky_subtracted is True:
+            self._writefits('sky')
         self._writefits('raw')
 
     def flat_field(self):
