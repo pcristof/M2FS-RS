@@ -24,13 +24,14 @@ Let us review how to perform a reduction with this pipeline.
 First, we assume that you have a directory containing fits files that look like rxxxxc1.fits, or bxxxxc4.fits, etc. This is the raw data you'll get from M2FS.
 
 $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
-[1] THE FRAMES.LIST FILE
+# \[1\] THE FRAMES.LIST FILE
 The program needs to know which frame number corresponds to what. The code reads and simple text file in order to read this information. Let us name this file frames.list (the name does not matter). Here is an example of how it should be formatted:
-________________
+
+```
 # utdate  Science-list arc-list led-list bias-list,range dark-list,range 
 ut20191116 36-37-39-40    33     34-42     149,298           401,405
 ut20180218 1251-1252     1248    1249     1130,1229       1126-1128,1131
-________________
+```
 
 - Lines starting with # are not read (comments).
 - Lines will be split, and the seperator is a space.
