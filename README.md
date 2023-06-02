@@ -15,6 +15,9 @@ Example, notebook, manual to come.
 #### KNOWN ISSUES:
 - Throughput correction and twightlight stacking not yet finished.
 - The plugmap txt file name {ccd}-plugmap.txt will currently show only unplugged if check_data() called before.  
+- Right now the program will fail if there is no sky apertures on the CCD currently being reduced.
+Future improvements should include checking that there are sky apertures and not correcting for sky if there are none,
+as well as using the sky from the other ccd if they are all placed on the only one ccd.
 
 
 # ----- QUICK START GUIDE -----
