@@ -106,7 +106,7 @@ class ReduceM2FS:
         self.id_lines_continuum_rejection_iterations = 10 #number of iterations of outlier rejection for fitting "continuum"
         self.id_lines_continuum_rejection_order = 10
         self.id_lines_threshold_factor = 50 # default was 10. Threshold to id lines based on continuum?
-        self.id_lines_window = 5.
+        self.id_lines_window = 7.
         self.id_lines_order = 5
         self.id_lines_tol_pix = 2. #tolerance for matching lines between template and new spectrum (pixels)
         self.id_lines_translate_add_lines_iterations = 5
@@ -136,8 +136,11 @@ class ReduceM2FS:
         self.filter = 'halphali' ## Will ignore - _ spaces and caps 
         self.filter = 'dupreeblue' ## Will ignore - _ spaces and caps 
         
-        self.sky_subtracted = False ## Informs us on whether the data was sky subtracted.
         self.corrdark = False ## trigger to correct the dark from the science frames
+        self.corr_apflat = False
+        self.sky_subtracted = False ## Informs us on whether the data was sky subtracted.
+        self.scatteredlight_corrected = False
+        self.apflat_corrected = False
 
     ## Setters
     def set_datapath(self, datapath):
@@ -597,7 +600,8 @@ class ReduceM2FS:
         #     pickle.dump(image_boundary,open(image_boundary_file,'wb'))#save pickle to file
 
         binning = self.binning
-        revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
+        revbin = self.binning
+        # revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
 
         ## Let's hardcode some boundaries:
         x1 = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) + 10
@@ -774,7 +778,7 @@ class ReduceM2FS:
             data=astropy.nddata.CCDData.read(data_file)#format is such that data.data[:,0] has column-0 value in all rows
 
             apmask0=m2fs.get_apmask(data,aperture_array,apertures_profile_middle,aperture_peak,image_boundary)
-
+            # apmask0[:] = False
             pickle.dump(apmask0,open(apmask_file,'wb'))
 
     def apflat(self):
@@ -836,17 +840,24 @@ class ReduceM2FS:
                     print('will overwrite existing version')
                 data=astropy.nddata.CCDData.read(data_file)#format is such that data.data[:,0] has column-0 value in all rows
                 apflat0=pickle.load(open(apflat_file,'rb'))
-                apflat0_noflat=apflat0.divide(apflat0)
-                apflat0_noflat.uncertainty=None
+                apflat0_noflat=apflat0.divide(apflat0) ## That makes 1
+                # apflat0_noflat.uncertainty=None
 
                 # if 'twilight' in "dummy-led":
                 if self.twilight:
                     apflatcorr0=data.divide(apflat0_noflat)#can't flat-field twilights when we didn't take an LED, so just don't flat-field any twilights
                 else:
-                    apflatcorr0=data.divide(apflat0)
+                    if self.corr_apflat:
+                        apflatcorr0=data.divide(apflat0)
+                    else:
+                        data_noflat = data.divide(data)
+                        apflatcorr0=data.divide(data_noflat)
                 print(data_file,apflat_file,apflatcorr_file)
                 pickle.dump(apflatcorr0,open(apflatcorr_file,'wb'))
-    
+            ## Now set a flag if the file now exists:
+            if path.exists(apflatcorr_file):
+                self.apflat_corrected = True
+
     def scatteredlightcorr(self):
         apmask_file = self.apmask_file
 
@@ -864,8 +875,10 @@ class ReduceM2FS:
                     print('will overwrite existing version')
                 data=astropy.nddata.CCDData.read(data_file)#format is such that data.data[:,0] has column-0 value in all rows
                 apmask0=pickle.load(open(apmask_file,'rb'))
-                apflatcorr0=pickle.load(open(apflatcorr_file,'rb'))
-
+                if self.apflat_corrected:
+                    apflatcorr0=pickle.load(open(apflatcorr_file,'rb'))
+                else:
+                    apflatcorr0=astropy.nddata.CCDData.read(data_file)
                 scatteredlightfunc=m2fs.get_scatteredlightfunc(data,apmask0,
                                                                self.scatteredlightcorr_order,
                                                                self.scatteredlightcorr_rejection_iterations,
@@ -878,7 +891,8 @@ class ReduceM2FS:
                 scatteredlightcorr0=apflatcorr0.subtract(scattered_model)
 
                 pickle.dump(scatteredlightcorr0,open(scatteredlightcorr_file,'wb'))  
-
+                pickle.dump(scattered_model,open(self.outpath+'{}{}-dumpscatterlight.pickle'.format(self.ccd, file_id),'wb'))  
+        self.scatteredlight_corrected = True
 
 
     def extract_1d(self, type):
@@ -910,21 +924,58 @@ class ReduceM2FS:
                 scatteredlightcorr0=pickle.load(open(scatteredlightcorr_file,'rb'))
                 pix=np.arange(len(scatteredlightcorr0.data[0]))
 
+                import time
+                itime = time.time()
                 extract1d_array=[]
+                extract1d_array_old = []
                 for k in range(0,len(aperture_array)):
-                    print('   extracting aperture ',aperture_array[k].trace_aperture,' of ',len(aperture_array))
+                    # print('   extracting aperture ',aperture_array[k].trace_aperture,' of ',len(aperture_array))
                     extract=m2fs.extract1d(aperture=aperture_array[k].trace_aperture,spec1d_pixel=pix,
                                            spec1d_flux=np.full(len(pix),0.,dtype='float')*data.unit,
                                            spec1d_uncertainty=StdDevUncertainty(np.full(len(pix),999.,dtype='float')),
                                            spec1d_mask=np.full(len(pix),True,dtype='bool'))
+                    extract_old = extract
                     if apertures_profile_middle.realvirtual[k]:
-                        extract1d0=m2fs.get_extract1d(k,scatteredlightcorr0,apertures_profile_middle,
+                        extract1d0=fdump.get_extract1d(k,scatteredlightcorr0,apertures_profile_middle,
                                                       aperture_array,aperture_peak,pix,
                                                       self.extract1d_aperture_width)
+                        
+                        ## PIC: The following was again to test that my new implementation of the extraction gives the
+                        ## same results as the old function.
+                        ## The new function using numba is about 30 to 80 times faster than the old one.
+                        #
+                        # extract1d0_old=fdump.get_extract1d_old(k,scatteredlightcorr0,apertures_profile_middle,
+                        #         aperture_array,aperture_peak,pix,
+                        #         self.extract1d_aperture_width)
+                        
+                        # pause = False
+                        # if np.std((extract1d0.spec1d_flux.value/extract1d0_old.spec1d_flux.value-1))>0.001:
+                        #     print('extract1d0.spec1d_flux mismatch')
+                        #     pause = True
+                        # if np.std((extract1d0.spec1d_pixel/extract1d0_old.spec1d_pixel-1))>0.001:
+                        #     print('extract1d0.spec1d_pixel mismatch')
+                        #     pause = True
+                        # if np.std((extract1d0.spec1d_mask/extract1d0_old.spec1d_mask-1))>0.001:
+                        #     print('extract1d0.spec1d_mask mismatch')
+                        #     pause = True
+                        # if np.std((extract1d0.spec1d_uncertainty.array/extract1d0_old.spec1d_uncertainty.array-1))>0.001:
+                        #     print('extract1d0.spec1d_uncertainty.array mismatch')     
+                        #     pause = True
+
+                        # if pause:
+                        #     from IPython import embed
+                        #     embed()
+
                         if len(np.where(extract1d0.spec1d_mask==False)[0])>0:
                             if np.max(extract1d0.spec1d_flux)>0.:
                                 extract=extract1d0
+                                # extract_old = extract1d0_old
                     extract1d_array.append(extract)
+                    extract1d_array_old.append(extract_old)                    
+                etime = time.time()
+                print("Time for extraction: {:0.2f} s".format(etime-itime))
+                # from IPython import embed
+                # embed()
                 if(len(extract1d_array)!=128):
                     print('problem with extract1d_flat')
                     # np.pause()
