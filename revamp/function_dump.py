@@ -2254,7 +2254,7 @@ def get_fitlines(extract1d,continuum_rejection_low,continuum_rejection_high,cont
 #    spec_contsub.flux[spec_contsub.flux.value<-100]=0.*u.electron
     id_lines_initial0=find_lines_derivative(spec_contsub,flux_threshold=threshold_factor*rms0)#find peaks in continuum-subtracted "spectrum"
     et = time.time(); print('submark 4 {}'.format(et - it))
-    fit_lines=m2fs.get_aperture_profile(id_lines_initial0,spec1d0,continuum0,window)
+    fit_lines=get_aperture_profile(id_lines_initial0,spec1d0,continuum0,window)
     et = time.time(); print('submark 5 {}'.format(et - it))
     return continuum0,spec_contsub,fit_lines
 
@@ -2291,10 +2291,17 @@ def fit_aperture(spec,window,x_center):
     val1=x_center-window/2.#window for fitting aperture
     val2=x_center+window/2.#window for fitting aperture
     subregion0=SpectralRegion(val1*u.AA,val2*u.AA)#define extraction region from window
-    sub_spectrum0=extract_region(spec,subregion0)#extract from window
-#    sub_spectrum=extract_region(spec,subregion0)#extract from window
+    # sub_spectrum0=extract_region(spec,subregion0)#extract from window
 
-    sub_spectrum=Spectrum1D(flux=sub_spectrum0.flux,spectral_axis=sub_spectrum0.spectral_axis,uncertainty=sub_spectrum0.uncertainty)
+    ## PIC: the extract_region function appears to be extremely slow...
+    ## I do not understand the point of this function, it appears to very
+    ## simply cut the spectrum. Let's try a simpler approach
+    myxaxis = spec.spectral_axis.value
+    idx = np.where((myxaxis>subregion0.bounds[0].value) & (myxaxis<subregion0.bounds[1].value))[0]
+    sub_spectrum = Spectrum1D(flux=spec.flux[idx], spectral_axis=spec.spectral_axis[idx], 
+                               uncertainty=spec.uncertainty[idx], mask=spec.mask[idx])
+    
+    # sub_spectrum=Spectrum1D(flux=sub_spectrum0.flux,spectral_axis=sub_spectrum0.spectral_axis,uncertainty=sub_spectrum0.uncertainty)
 #    print(sub_spectrum)
 #    print(sub_spectrum)
     rough=estimate_line_parameters(sub_spectrum,models.Gaussian1D())#get rough estimate of gaussian parameters for aperture
@@ -2310,7 +2317,60 @@ def fit_aperture(spec,window,x_center):
 
     g_init=models.Gaussian1D(amplitude=rough.amplitude.value*u.electron,mean=rough.mean.value*u.AA,stddev=rough.stddev.value*u.AA)#now do a fit using rough estimate as first guess
     g_fit0=fit_lines(sub_spectrum,g_init)#now do a fit using rough estimate as first guess
+    # g_fit2=myfit_lines(sub_spectrum,g_init)#now do a fit using rough estimate as first guess
+    
+    ## PIC: The following was just to make a plot and test a different fitting function
+    #
+    # ## Now what I do is to check whether the two fitting processes gave the same results
+    # ampdiff = g_fit2.amplitude.value - g_fit0.amplitude.value
+    # meandiff = g_fit2.mean.value - g_fit0.mean.value
+    # stddiff = g_fit2.stddev.value - g_fit0.stddev.value
+    # plot=False
+    # if abs(ampdiff) > 0.1*g_fit2.amplitude.value:
+    #     print("NOT THE SAME AMPLITUDE") 
+    #     print(g_fit0.amplitude.value, g_fit2.amplitude.value) 
+    #     plot=True
+    # if abs(meandiff) > 0.1*g_fit2.mean.value:
+    #     print("NOT THE SAME MEAN") 
+    #     print(g_fit0.mean.value, g_fit2.mean.value) 
+    #     plot=True
+    # if abs(stddiff) > 0.1*g_fit2.stddev.value:
+    #     print("NOT THE SAME STDDEV") 
+    #     print(g_fit0.stddev.value, g_fit2.stddev.value) 
+    #     plot=True
+    #
+    # if plot:
+    #     plt.figure()
+    #     plt.plot(sub_spectrum.spectral_axis.value, sub_spectrum.flux.value, '.', color='black')
+    #     plt.plot(sub_spectrum.spectral_axis.value, g_fit2(sub_spectrum.spectral_axis), color='green', label='curve fit')
+    #     plt.plot(sub_spectrum.spectral_axis.value, g_fit0(sub_spectrum.spectral_axis), color='red', label='specutils fitline')
+    #     plt.legend()
+    #     plt.show()
+    
     return subregion0,g_fit0
+
+def gaussian(x, amplitude, mean, std):
+    return amplitude * np.exp(-(x - mean)**2 / (2 * std**2))
+
+from scipy.optimize import curve_fit
+def myfit_lines(sub_spectrum,g_init):
+    '''Alternative function to fit a Gaussian profile to data.
+    Original added here because I though the fitting was slow,
+    It turns out that specutils performs great for the fitting, but
+    the exatract_region function is super slow.'''
+    #
+    ## initial guess
+    p = [g_init.amplitude.value, g_init.mean.value, g_init.stddev.value]
+    xaxis = sub_spectrum.spectral_axis.value
+    yaxis = sub_spectrum.flux.value
+    sigma = sub_spectrum.uncertainty.array
+    # from IPython import embed
+    # embed()
+    popt, pcov = curve_fit(gaussian, xaxis, yaxis, p0=p, sigma=sigma)
+    amplitude_fit, mean_fit, std_fit = popt
+    #
+    g_curvefit=models.Gaussian1D(amplitude=amplitude_fit*u.electron,mean=mean_fit*u.AA,stddev=std_fit*u.AA)
+    return g_curvefit
 
 def get_columnspec(data,trace_step,n_lines,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order,threshold_factor,window):
     import numpy as np
