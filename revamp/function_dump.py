@@ -794,7 +794,7 @@ def on_key_find(event,args_list):
             new_center=np.float(event.xdata)
             x_center=new_center
             spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
-            subregion0,fit0=m2fs.fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+            subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
             subregion.append(subregion0)
             fit.append(fit0)
             realvirtual.append(True)
@@ -822,7 +822,7 @@ def on_key_find(event,args_list):
                 new_center=np.float(eventxdata)
                 x_center=new_center
                 spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
-                subregion0,fit0=m2fs.fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+                subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
                 subregion.append(subregion0)
                 fit.append(fit0)
                 realvirtual.append(True)
@@ -852,7 +852,7 @@ def on_key_find(event,args_list):
                     new_center=np.float(eventxdata)
                     x_center=new_center
                     spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
-                    subregion0,fit0=m2fs.fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+                    subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
                     subregion.append(subregion0)
                     fit.append(fit0)
                     realvirtual.append(True)
@@ -896,7 +896,7 @@ def on_key_find(event,args_list):
                     new_center=np.float(enventxdata)
                     x_center=new_center
                     spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
-                    subregion0,fit0=m2fs.fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+                    subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
                     subregion.append(subregion0)
                     fit.append(fit0)
                     realvirtual.append(True)
@@ -953,7 +953,7 @@ def on_key_find(event,args_list):
                     new_center=np.float(enventxdata)
                     x_center=new_center
                     spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
-                    subregion0,fit0=m2fs.fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+                    subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
                     subregion.append(subregion0)
                     fit.append(fit0)
                     realvirtual.append(True)
@@ -1019,7 +1019,7 @@ def on_key_find(event,args_list):
                     new_center=np.float(enventxdata)
                     x_center=new_center
                     spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
-                    subregion0,fit0=m2fs.fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+                    subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
                     subregion.append(subregion0)
                     fit.append(fit0)
                     realvirtual.append(True)
@@ -1064,7 +1064,7 @@ def on_key_find(event,args_list):
                     new_center=np.float(enventxdata)
                     x_center=new_center
                     spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
-                    subregion0,fit0=m2fs.fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+                    subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
                     subregion.append(subregion0)
                     fit.append(fit0)
                     realvirtual.append(True)
