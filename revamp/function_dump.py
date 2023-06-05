@@ -2298,10 +2298,12 @@ def fit_aperture(spec,window,x_center):
     ## simply cut the spectrum. Let's try a simpler approach
     myxaxis = spec.spectral_axis.value
     idx = np.where((myxaxis>subregion0.bounds[0].value) & (myxaxis<subregion0.bounds[1].value))[0]
-    sub_spectrum = Spectrum1D(flux=spec.flux[idx], spectral_axis=spec.spectral_axis[idx], 
+    sub_spectrum0 = Spectrum1D(flux=spec.flux[idx], spectral_axis=spec.spectral_axis[idx], 
                                uncertainty=spec.uncertainty[idx], mask=spec.mask[idx])
     
-    # sub_spectrum=Spectrum1D(flux=sub_spectrum0.flux,spectral_axis=sub_spectrum0.spectral_axis,uncertainty=sub_spectrum0.uncertainty)
+    ## PIC: Apparently we must have an object without the mask for that to work. 
+    ## Probably because False is generally use to mark invalid bins and not the other way around.
+    sub_spectrum=Spectrum1D(flux=sub_spectrum0.flux,spectral_axis=sub_spectrum0.spectral_axis,uncertainty=sub_spectrum0.uncertainty)
 #    print(sub_spectrum)
 #    print(sub_spectrum)
     rough=estimate_line_parameters(sub_spectrum,models.Gaussian1D())#get rough estimate of gaussian parameters for aperture
