@@ -2420,6 +2420,23 @@ def get_columnspec(data,trace_step,n_lines,continuum_rejection_low,continuum_rej
 #    return columnspec(columns=col,spec1d=spec1d,pixel=pixel,continuum=continuum,rms=rms,apertures_initial=apertures_initial,apertures_profile)
     return columnspec_array
 
+def get_aperture_profile(apertures_initial,spec1d,continuum,window):
+    import numpy as np
+
+    subregion=[]
+    g_fit=[]
+    realvirtual=[]#1 for real aperture, 0 for virtual aperture (ie a placeholder aperture for bad/unplugged fiber etc.)
+    initial=[]#1 for apertures identified automatically, 0 for those identified by hand
+
+    for j in range(0,len(apertures_initial)):
+        x_center=apertures_initial['line_center'][j].value
+        subregion0,g_fit0=fit_aperture(spec1d-continuum(spec1d.spectral_axis.value),window,x_center)
+        subregion.append(subregion0)
+        g_fit.append(g_fit0)
+        realvirtual.append(True)
+        initial.append(True)
+    return m2fs.aperture_profile(g_fit,subregion,realvirtual,initial)
+
 def get_aperture_profile_fast(apertures_initial,spec1d,continuum,window):
     import numpy as np
     import astropy.units as u
@@ -2764,16 +2781,17 @@ def get_aperture_fast(j,columnspec_array,apertures_profile_middle,middle_column,
             center=func[len(func)-1](x[i])
             if((center>0.)&(center<np.max(columnspec_array[i].pixel.value))):#make sure the trace function y(x) makes sense at this x
                 spec1d=Spectrum1D(spectral_axis=columnspec_array[i].pixel,flux=columnspec_array[i].spec*u.electron,uncertainty=columnspec_array[i].err,mask=columnspec_array[i].mask)
-                # subregion0,g_fit0=fit_aperture(spec1d-columnspec_array[i].continuum(columnspec_array[i].pixel.value),window,center)
                 ## PIC: Instead of refitting the entire thing all the time, I assume that the width is fixed 
                 ## (estimated from the middle profile.)
                 ## There "all" we need to update is the maximum position and value
-                pos, amp = peak_finder((spec1d-columnspec_array[i].continuum(columnspec_array[i].pixel.value)).data)
-                newmeanidx = np.where((pos-center)**2==np.min((pos-center)**2))[0][0]
-                newmean = pos[newmeanidx]
-                newamp = amp[newmeanidx]
-                g_fit0 = models.Gaussian1D(amplitude=newamp*u.electron, mean=newmean*u.AA,
-                                           stddev=apertures_profile_middle.fit[j].stddev.value*u.AA)
+                # pos, amp = peak_finder((spec1d-columnspec_array[i].continuum(columnspec_array[i].pixel.value)).data)
+                # newmeanidx = np.where((pos-center)**2==np.min((pos-center)**2))[0][0]
+                # newmean = pos[newmeanidx]
+                # newamp = amp[newmeanidx]
+                # g_fit0 = models.Gaussian1D(amplitude=newamp*u.electron, mean=newmean*u.AA,
+                #                            stddev=apertures_profile_middle.fit[j].stddev.value*u.AA)
+                ## But now that I optimized fit_aperture, we can try with the old method:
+                subregion0,g_fit0=fit_aperture(spec1d-columnspec_array[i].continuum(columnspec_array[i].pixel.value),window,center)
                 y1.append(g_fit0.stddev.value)
                 y2.append(g_fit0.amplitude.value)
             else:#otherwise give a place-holder value and mask it below
