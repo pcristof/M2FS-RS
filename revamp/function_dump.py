@@ -2143,10 +2143,9 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
             ## and the overal stretch.
             ## Why don't we get a value of the main RV as well? How can that work at all if we
             ## do not account for the RV shift?
-
             dsampler=DynamicNestedSampler(loglike,ptform,ndim,bound='multi')
             #        sampler=NestedSampler(loglike,ptform,ndim,bound='multi')
-            dsampler.run_nested(maxcall=12000)
+            dsampler.run_nested(maxcall=12000, print_progress=False)
             #        sampler.run_nested(dlogz=0.05)
 
             ## Where is the dsampler maximal? 
@@ -2168,8 +2167,10 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
             # embed()
             #### ---------------
 
+            print('mark 3.5 {}'.format(time.time()))
 
             shiftstretch=scipy.optimize.minimize(my_func,params,method='Powell')
+            # enablePrint()
             # interp=get_interp(shiftstretch.x) ## Unused
             print('log likelihood/1e9 = ',loglike(shiftstretch.x)/1.e9)
 
@@ -3094,3 +3095,144 @@ def fftinterp(x, xp, fp, factor=4):
     _x, _y = xresample(xp, fp, factor=factor)
     res = np.interp(x, _x, _y)
     return res*myunit ## Should allow converting to quantity
+
+def get_extract1d(j,data,apertures_profile_middle,aperture_array,aperture_peak,pix,extract1d_aperture_width,offset=0):
+    import numpy as np
+    import scipy
+    from astropy.nddata import CCDData
+    from specutils.spectra import Spectrum1D
+    import astropy.units as u
+    from astropy.nddata import StdDevUncertainty
+
+    above0,below0=m2fs.get_above_below(j,data,aperture_array,apertures_profile_middle,aperture_peak)
+
+    spec=[]
+    spec_error=[]
+    spec_mask=[]
+    # from IPython import embed
+    # embed()
+    ymids=aperture_array[j].trace_func(pix)+offset
+    profile_sigmas=aperture_array[j].profile_sigma(pix)
+    extract1d_aperture_widths = np.ones(len(profile_sigmas))*extract1d_aperture_width
+    halfwidths = np.ones(len(profile_sigmas))*(above0-below0)/2./2.
+    wings=np.amin([extract1d_aperture_widths,3.*profile_sigmas,halfwidths], axis=0)
+    _data = np.array(data.data, dtype=float)
+    _mask = np.array(data.mask, dtype=float)
+    _uncertainty = np.array(data.uncertainty.array, dtype=float)
+    spec, spec_error, spec_mask = extract_aperture(pix, _data, _mask, _uncertainty, ymids, profile_sigmas, wings)
+
+#     for x in pix:
+#         ymid=aperture_array[j].trace_func(x)+offset
+#         profile_sigma=aperture_array[j].profile_sigma(x)
+#         wing=np.min([extract1d_aperture_width,3.*profile_sigma,(above0-below0)/2./2.])
+# #        wing=3.
+#         y1=np.long(ymid-wing)
+#         y2=np.long(ymid+wing)
+#         sss=data[y1:y2+1,x]
+#         if ((wing>0.)&(len(np.where(sss.mask==False)[0])>=1)):
+# #            sum1=CCDData([0.],unit=data.unit,mask=[False])
+#             sum1=0.
+#             sum2=0.
+#             for k in range(0,len(sss.data)):
+#                 if sss.mask[k]==False:
+#                     int1=0.5*(scipy.special.erf(ymid/profile_sigma/np.sqrt(2.))-scipy.special.erf((ymid-(y1-0.5+k))/profile_sigma/np.sqrt(2.)))
+#                     int2=0.5*(scipy.special.erf(ymid/profile_sigma/np.sqrt(2.))-scipy.special.erf((ymid-(y1-0.5+k+1))/profile_sigma/np.sqrt(2.)))
+#                     weight=int2-int1
+# #                    sum1=sum1.add((sss[k].multiply(weight)).divide(sss.uncertainty.quantity.value[k]**2))
+#                     sum1+=sss.data[k]*weight/sss.uncertainty.quantity.value[k]**2
+#                     sum2+=weight**2/sss.uncertainty.quantity.value[k]**2
+# #            val=sum1.divide(sum2)
+#             val=sum1/sum2
+#             err=1./np.sqrt(sum2)
+#             spec.append(val)
+#             spec_error.append(err)
+#             if ((val==val)&(err>0.)&(err==err)):
+#                 spec_mask.append(False)
+#             else:
+#                 spec_mask.append(True)
+# #            spec.append(sss.data[0])
+# #            spec_error.append(sss.uncertainty.quantity.value[0])
+# #            spec_mask.append(False)            
+#         else:
+#             spec.append(0.)
+#             spec_mask.append(True)
+#             spec_error.append(999.)
+    # spec=np.array(spec)
+    # spec_mask=np.array(spec_mask)
+    # spec_error=np.array(spec_error)
+
+    spec=np.array(spec, dtype=float)
+    spec_mask=np.array(spec_mask, dtype=bool) ## Must be bool otherwise we'll have problems later
+    spec_error=np.array(spec_error, dtype=float)
+
+    spec_mask[np.where(((pix<aperture_array[j].trace_pixel_min)|(pix>aperture_array[j].trace_pixel_max)))[0]]=True
+    return m2fs.extract1d(aperture=aperture_array[j].trace_aperture,spec1d_pixel=pix,spec1d_flux=spec*data.unit,spec1d_uncertainty=StdDevUncertainty(spec_error),spec1d_mask=spec_mask)
+
+
+from numba import jit
+@jit(nopython=True)
+def numbaerf(x):
+    # save the sign of x
+    sign = 1 if x >= 0 else -1
+    x = abs(x)
+
+    # constants
+    a1 =  0.254829592
+    a2 = -0.284496736
+    a3 =  1.421413741
+    a4 = -1.453152027
+    a5 =  1.061405429
+    p  =  0.3275911
+
+    # A&S formula 7.1.26
+    t = 1.0/(1.0 + p*x)
+    y = 1.0 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t*np.exp(-x*x)
+    return sign*y # erf(-x) = -erf(x)
+
+@jit(nopython=True)
+def extract_aperture(pix, _data, _mask, _uncertainty, ymids, profile_sigmas, wings):
+    '''Jit function for fast extraction of an aperture'''
+    myspec = np.ones(len(pix))
+    myerr = np.ones(len(pix))    
+    mymask = np.ones(len(pix))*True
+    for x in pix:
+#        wing=3.
+        ymid = ymids[x]
+        profile_sigma = profile_sigmas[x]
+        wing = wings[x]
+        ymid = ymids[x]
+        y1=np.long(ymid-wing)
+        y2=np.long(ymid+wing)
+        data=_data[y1:y2+1,x]
+        mask=_mask[y1:y2+1,x]
+        uncertainty = _uncertainty[y1:y2+1,x]
+        if ((wing>0.)&(len(np.where(mask==0)[0])>=1)):
+#            sum1=CCDData([0.],unit=data.unit,mask=[False])
+            sum1=0.
+            sum2=0.
+            for k in range(0,len(data)):
+                if mask[k]==False:
+                    int1=0.5*(numbaerf(ymid/profile_sigma/np.sqrt(2.))-numbaerf((ymid-(y1-0.5+k))/profile_sigma/np.sqrt(2.)))
+                    int2=0.5*(numbaerf(ymid/profile_sigma/np.sqrt(2.))-numbaerf((ymid-(y1-0.5+k+1))/profile_sigma/np.sqrt(2.)))
+                    weight=int2-int1
+#                    sum1=sum1.add((sss[k].multiply(weight)).divide(uncertainty.quantity.value[k]**2))
+                    sum1+=data[k]*weight/uncertainty[k]**2
+                    sum2+=weight**2/uncertainty[k]**2
+#            val=sum1.divide(sum2)
+            val=sum1/sum2
+            err=1./np.sqrt(sum2)
+            myspec[x] = val
+            myerr[x] = err
+            if ((val==val)&(err>0.)&(err==err)):
+                mymask[x] = False
+            else:
+                mymask[x] = True
+#            spec.append(sss.data[0])
+#            spec_error.append(sss.uncertainty.quantity.value[0])
+#            spec_mask.append(False)            
+        else:
+            myspec[x] = 0.
+            mymask[x] = True
+            myerr[x] = 999.
+    
+    return myspec, myerr, mymask        
