@@ -2192,9 +2192,9 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
                     x[i]=prior[i][0]+(prior[i][1]-prior[i][0])*u[i]
                 return x
 
-            etime = time.time()
-            print('mark 3 {:0.2f}'.format(etime-itime))
-            itime = time.time()
+            # etime = time.time()
+            # print('mark 3 {:0.2f}'.format(etime-itime))
+            # itime = time.time()
 
             ## PIC The DynamicNestedSampler is apparently used to obtain some sort of a 
             ## first guess on the first two parameters, i.e. on the INTENSITY of the spectrum 
@@ -2280,7 +2280,7 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
                         id_lines_wav.append(id_lines_template.wav[i])
                         id_lines_used.append(best)
             
-            print('mark 4 {}'.format(time.time()))
+            # print('mark 4 {}'.format(time.time()))
 
             if len(id_lines_pix)>0:
                 func=[models.Legendre1D(degree=1)]
@@ -2339,7 +2339,7 @@ def get_fitlines(extract1d,continuum_rejection_low,continuum_rejection_high,cont
     return continuum0,spec_contsub,fit_lines
 
 def get_aperture_profile(apertures_initial,spec1d,continuum,window):
-    
+
     subregion=[]
     g_fit=[]
     realvirtual=[]#1 for real aperture, 0 for virtual aperture (ie a placeholder aperture for bad/unplugged fiber etc.)

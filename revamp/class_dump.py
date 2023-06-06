@@ -138,6 +138,7 @@ class ReduceM2FS:
         
         self.corrdark = False ## trigger to correct the dark from the science frames
         self.corr_apflat = False
+        #
         self.sky_subtracted = False ## Informs us on whether the data was sky subtracted.
         self.scatteredlight_corrected = False
         self.apflat_corrected = False
@@ -393,10 +394,14 @@ class ReduceM2FS:
         self.stack_array_files = {}
         self.stack_wavcal_array_files = {}
         self.stack_array_files_nosky = {}
+        self.stack_array_files_flat_nosky = {}
+        self.ref_array_files_flat = {}
         self.stack_wavcal_array_files_nosky = {}
         for ccd in ['r', 'b']:    
             self.stack_array_files[ccd] = self.outpath + "{}-stack-array-skysubtract.pickle".format(ccd)
             self.stack_array_files_nosky[ccd] = self.outpath + "{}-stack-array.pickle".format(ccd)
+            self.stack_array_files_flat_nosky[ccd] = self.outpath + "{}-stack-flat-array.pickle".format(ccd)
+            self.ref_array_files_flat[ccd] = self.outpath +  "{}-flat-array.pickle".format(ccd)
             self.stack_wavcal_array_files[ccd] = self.outpath \
                 + "{}-stack-wavcal-array-skysubtract.pickle".format(ccd)
             self.stack_wavcal_array_files_nosky[ccd] = self.outpath \
@@ -407,9 +412,9 @@ class ReduceM2FS:
                             + "{}{:04d}-plugmap.pickle".format(self.ccd, self.led_ref)
         self.plugmap_txtfile = self.outpath \
                             + "{}-plugmap.txt".format(self.ccd)
-        self.image_boundary_file = self.outpath \
+        self.image_boundary_file = self.tmppath \
                             + "{}{:04d}-image-boundary.pickle".format(self.ccd, self.led_ref)
-        self.columnspec_array_file = self.outpath \
+        self.columnspec_array_file = self.tmppath \
                             + "{}{:04d}-columnspec-array.pickle".format(self.ccd, self.led_ref)
         self.apertures_profile_middle_file = self.outpath \
                 + "{}{:04d}-apertures-profile-middle.pickle".format(self.ccd, self.led_ref)
@@ -432,6 +437,9 @@ class ReduceM2FS:
                     + "{}-{}{:04d}-results-skysubtract.fits".format(self.utdate, ccd, file_id)
                 self.extract1d_fits_files[(self.utdate, ccd, file_id)] = self.outpath \
                     + "{}-{}{:04d}-results.fits".format(self.utdate, ccd, file_id)
+            for file_id in [self.led_ref]: ## So we can store the flat for correction
+                self.extract1d_fits_files[(self.utdate, ccd, file_id)] = self.outpath \
+                    + "{}-{}-flat-results.fits".format(self.utdate, ccd)
             self.fits_stack[(self.utdate, ccd)] = self.outpath \
                     + "{}-{}-results-skysubtract.fits".format(self.utdate, ccd)
             self.extract1d_fits_stack[(self.utdate, ccd)] = self.outpath \
@@ -653,6 +661,10 @@ class ReduceM2FS:
         normalization of the column...
         This obviously should only be applied to the FLAT exposure'''
         ## work file
+        ## The columnspec_array_file should be the same for every ccd, 
+        ## so long as we haven't changed the triming. It make sense to just use the file
+        ## and store it in a first directory.
+
         led_id = self.led_ref ## Reference LED frame
         columnspec_array_file = self.columnspec_array_file
         columnspec_array_exists=path.exists(columnspec_array_file) # Exists?
@@ -1702,10 +1714,8 @@ class ReduceM2FS:
                 elif self.crreject_bool:
                     infile = self.cr_reject_array_files[(self.ccd, file_id)]
                 else:
-                    if self.flat_field_bool:
-                        infile = self.extract1d_flatfield_array_files[(self.ccd, file_id)]
-                    else:
-                        infile = self.extract1d_array_files[(self.ccd, file_id)]
+                    infile_flat = self.extract1d_flatfield_array_files[(self.ccd, file_id)]
+                    infile_noflat = self.extract1d_array_files[(self.ccd, file_id)]
                     # infile = self.tmppath + "{}{:04d}-cr-reject-array.pickle".format(self.ccd, file_id)
                 wavcal_array_file = self.wavcal_array_files[(self.ccd, file_id)]
                 # wavcal_array_file = self.tmppath + "{}{:04d}-wavcal-array.pickle".format(self.ccd, file_id)
@@ -1716,9 +1726,13 @@ class ReduceM2FS:
                     stack_wavcal_array_file = self.stack_wavcal_array_files[self.ccd]
                     stack_array_file = self.stack_array_files[self.ccd]
                 if 'raw' in kind:
-                    skysubtract_array=pickle.load(open(infile,'rb'))
+                    skysubtract_array=pickle.load(open(infile_noflat,'rb'))
                     stack_wavcal_array_file = self.stack_wavcal_array_files_nosky[self.ccd]
                     stack_array_file = self.stack_array_files_nosky[self.ccd]
+                if 'flat' in kind:
+                    skysubtract_array=pickle.load(open(infile_flat,'rb'))
+                    stack_wavcal_array_file = self.stack_wavcal_array_files_nosky[self.ccd]
+                    stack_array_file = self.stack_array_files_flat_nosky[self.ccd]
                 # throughputcorr_array=pickle.load(open(infile,'rb'))
 #                    wavcal_array=pickle.load(open(wavcal_array_file,'rb'))
 #                    id_lines_array_file=datadir+utdate[i]+'/'+ccd+str(tharfile0[i][j]).zfill(4)+'_id_lines_array.pickle'
@@ -1752,7 +1766,7 @@ class ReduceM2FS:
 
             stack_wavcal_array=[]
             for j in range(0,len(skysubtract_array)):
-                print('stackwavcal working on aperture',j+1,' of ',len(skysubtract_array))
+                # print('stackwavcal working on aperture',j+1,' of ',len(skysubtract_array))
                 stack_wavcal_array.append(m2fs.get_wav(j,thar,skysubtract_array,thar_mjd,mjd_weightedmean,id_lines_minlines))
             pickle.dump(stack_wavcal_array, open(stack_wavcal_array_file,'wb'))
 
@@ -1765,6 +1779,7 @@ class ReduceM2FS:
         if self.sky_subtracted is True:
             self._stack_frames('skycorr')
         self._stack_frames('raw')
+        self._stack_frames('flat')
     
     def _writefits(self, kind='sky'):
         '''Function to write the results in fits files.
@@ -1775,34 +1790,33 @@ class ReduceM2FS:
                                                                             self.lco, self.use_flat,
                                                                             self.hires_exptime, 
                                                                             self.id_lines_array_files)
+        ## Get the stacked files
         if 'sky' in kind:
             stack_array_file = self.stack_array_files[self.ccd]
             stack_wavcal_array_file = self.stack_wavcal_array_files[self.ccd]
         if 'raw' in kind:
             stack_array_file = self.stack_array_files_nosky[self.ccd]
             stack_wavcal_array_file = self.stack_wavcal_array_files_nosky[self.ccd]
-        # stack_array_file=root2+'_stack_array.pickle'
-        # stack_wavcal_array_file=root2+'_stack_wavcal_array.pickle'
         stack_array=pickle.load(open(stack_array_file,'rb'))
         stack_wavcal_array=pickle.load(open(stack_wavcal_array_file,'rb'))
 
-        ## PIC I add this cause apparently we need it for the get_hdul function
+        ## PIC: I add this cause apparently we need it for the get_hdul function
         aperture_array_file = self.aperture_array_file
         aperture_array = pickle.load(open(aperture_array_file,'rb'))
         linelist_file = self.linelist_file
         linelist = fdump.get_linelist(linelist_file)
 
         temperature=[]
-        # for j in range(0,len(scifile0[i])):
         for file_id in self.sci_list:
-            # root0=datadir+utdate[i]+'/'+ccd+str(scifile0[i][j]).zfill(4)
-            # data_file=root0+'_stitched.fits'
             data_file = self.filedict[(self.ccd, file_id)]
             wavcal_array_file = self.wavcal_array_files[(self.ccd, file_id)]
             if 'sky' in kind:
                 skysubtract_array_file = self.skysubtract_array_files[(self.ccd, file_id)]
             if 'raw' in kind:
-                skysubtract_array_file = self.extract1d_array_files[(self.ccd, file_id)]
+                if self.flat_field_bool:
+                    skysubtract_array_file = self.extract1d_flatfield_array_files[(self.ccd, file_id)]
+                else:
+                    skysubtract_array_file = self.extract1d_array_files[(self.ccd, file_id)]
             sky_array_file = self.sky_array_files[(self.ccd, file_id)]
             plugmap_file = self.plugmap_file
             #
@@ -1897,10 +1911,96 @@ class ReduceM2FS:
                 np.pause()
             new_hdul.writeto(stack_fits_file,overwrite=True)
 
+    def _write_all(self):
+        '''This function writes the output fits file for the reduction.
+        The goal is to put everything in a single file for the stacked frames.
+        Right now it does support nor save the sky corrected spectra.
+        '''
+
+        # from IPython import embed
+        # embed()
+
+        data_file = self.filedict[(self.ccd, self.sci_list[0])]
+        headers = fits.getheader(data_file)
+
+        plugmap0=pickle.load(open(self.plugmap_file,'rb'))
+
+
+        #############################
+        ## For the stacked spectra ##
+        stack_wavcal_array_file = self.stack_wavcal_array_files_nosky[self.ccd] ## Wavelength file common to all
+        stack_array_file = self.stack_array_files_nosky[self.ccd] ## File with NO sky correctoin
+        stack_array_file_flat_nosky = self.stack_array_files_flat_nosky[self.ccd] ## File with NO sky AFTER flat correction
+        ref_array_file_flat = self.ref_array_files_flat[self.ccd] ## File with NO sky AFTER flat correction
+        stack_wavcal_array=pickle.load(open(stack_wavcal_array_file,'rb'))
+        stack_array=pickle.load(open(stack_array_file,'rb'))
+        stack_array_flat=pickle.load(open(stack_array_file_flat_nosky,'rb'))
+        ref_array_flat=pickle.load(open(ref_array_file_flat,'rb'))
+        # Converting to numpy arrays
+        naps = len(stack_array)
+        npoints = len(stack_array[0].spec1d_flux.value)
+        mywvl = np.empty((naps, npoints))
+        myspec = np.empty((naps, npoints))
+        myerror = np.empty((naps, npoints))
+        myspecflat = np.empty((naps, npoints))
+        myflat = np.empty((naps, npoints))
+        for ap in range(naps):
+            _wvl = stack_wavcal_array[ap].wav
+            if len(_wvl)==0: _wvl = np.arange(npoints) ## To avoid shape mismatches
+            mywvl[ap] = _wvl
+            myspec[ap] = stack_array[ap].spec1d_flux.value
+            myspecflat[ap] = stack_array_flat[ap].spec1d_flux.value
+            myflat[ap] = ref_array_flat[ap]
+            myerror[ap] = stack_array[ap].spec1d_uncertainty.array
+        #
+        hdu = fits.PrimaryHDU()
+        hdu.header['OBJECT'] = (headers['OBJECT'], 'object observed')
+        hdu.header['UTDATE'] = (self.utdate, 'utdate directory used')
+        hdu.header['FILTER'] = (self.filter, 'Filter used for observations')
+        hdu.header['RWFILTER'] = (headers['FILTER'], 'raw filter name as appearing in the raw data')
+        #
+        hdutable = fits.BinTableHDU.from_columns([
+            fits.Column(name='APERTURE', format='I', array=plugmap0['APERTURE']),
+            fits.Column(name='OBJTYPE', format='A6', array=plugmap0['OBJTYPE'])
+            ])
+        hdutable.name = 'BINTABLE'
+        #
+        hdu1 = fits.ImageHDU(data=mywvl, name='WVL')
+        hdu2 = fits.ImageHDU(data=myspec, name='SPEC')
+        hdu3 = fits.ImageHDU(data=myspecflat, name='SPECFLAT')
+        hdu4 = fits.ImageHDU(data=myflat, name='FLAT')
+        hdu5 = fits.ImageHDU(data=myspec, name='ERROR')
+        hdul = fits.HDUList([hdu, hdu1, hdu2, hdu3, hdu4, hdu5, hdutable])
+        hdul.writeto(self.extract1d_fits_stack[(self.utdate, self.ccd)], overwrite=True)
+        #############################
+        
+    def _writefits_flat(self, kind='flat'):
+        '''Function to write the results in fits files.
+        I choose to name the files based on the frame, color utdate.'''
+        
+        # for j in range(0,len(scifile0[i])):
+        for file_id in [self.led_ref]:
+            data_file = self.filedict[(self.ccd, file_id)]
+            if 'flat' in kind:
+                flat_array_file = self.extract1d_array_files[(self.ccd, file_id)]
+            flat_array=pickle.load(open(flat_array_file,'rb'))
+
+            outputarray = np.empty((len(flat_array), len(flat_array[0].spec1d_flux.value)))
+            for ap in range(len(flat_array)):
+                outputarray[ap] = flat_array[ap].spec1d_flux.value
+
+            fits_file = self.extract1d_fits_files[(self.utdate, self.ccd, file_id)]
+            
+            hdu = fits.PrimaryHDU(outputarray)
+            hdu.writeto(fits_file, overwrite=True)
+
+
     def writefits(self):
-        if self.sky_subtracted is True:
-            self._writefits('sky')
-        self._writefits('raw')
+        # if self.sky_subtracted is True:
+        #     self._writefits('sky')
+        # self._writefits('raw')
+        # self._writefits_flat()
+        self._write_all()
 
     def flat_field(self):
         '''Function to correct spectra by flat spectra'''
@@ -1926,21 +2026,38 @@ class ReduceM2FS:
                     print('will overwrite {}'.format(outfile))
 
                 sci_array = pickle.load(open(infile, 'rb'))
-
+                continnua = []
                 for i in range(len(sci_array)):
-                    meanflatspec = np.nanmean(led_array[i].spec1d_flux)
+                    meanflatspec = np.nanmax(led_array[i].spec1d_flux)
                     flatspec = led_array[i].spec1d_flux / meanflatspec
-                    
+                    # from IPython import embed
+                    # embed()
+                    from irap_tools import normalizationTools as norm_tools
+                    smoothflatspec, c = norm_tools.moving_median(flatspec, 10)
+                    # smoothflatspec, c2 = norm_tools.moving_median(sci_array[i].spec1d_flux, 50)
+
+                    c[c<0.1] = np.nan
+
                     # plt.figure()
-                    # plt.plot(sci_array[i].spec1d_flux)
+                    # plt.plot(led_array[i].spec1d_flux)
+                    # # plt.plot(c)
+                    # plt.show()
+
+
+                    # plt.figure()
+                    # # plt.plot(sci_array[i].spec1d_flux)
+                    # plt.plot(sci_array[i].spec1d_flux / c)
+                    # plt.show()
                     
-                    sci_array[i].spec1d_flux = sci_array[i].spec1d_flux / flatspec
+                    sci_array[i].spec1d_flux = sci_array[i].spec1d_flux / c
                     
                     # plt.plot(sci_array[i].spec1d_flux)
 
                     # plt.plot(flatspec)
                     # plt.show()
+                    continnua.append(c)
 
                 pickle.dump(sci_array, open(outfile, 'wb'))
+                pickle.dump(continnua, open(self.ref_array_files_flat[self.ccd], 'wb'))
 
         self.flat_field_bool = True
