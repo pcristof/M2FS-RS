@@ -2059,6 +2059,7 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
         use_template=np.where((extract1d_template.spec1d_pixel>=pixelmin_template)&(extract1d_template.spec1d_pixel<=pixelmax_template)&(extract1d.spec1d_mask==False))[0]
 
         print('mark 2 {}'.format(time.time()))
+        itime = time.time()
 
         if len(fit_lines.fit)>0:
 
@@ -2086,7 +2087,7 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
 #        spec_contsub=spec_contsub0/(np.median(spec_contsub0.flux.value[use]))
 #        spec_contsub_template=spec_contsub_template0/(np.median(spec_contsub_template0.flux.value[use_template]))
             '''first run dynesty to fit for zero order offset between current lamp spectrum and template (gradient-descent gets stuck in local minima)'''
-            ndim=8
+            ndim=3
             def get_interp(q):#spec_contsub,spec_contsub_template,use,use_template,pixel0_template,pixelscale_template):
                 '''Function returning the interpolated spectrum obtained after adjusting the wavelength
                 with the polynomial parameters stored in q.
@@ -2126,35 +2127,57 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
                 # prior.append([-2.0,2.0]) ## Radial velocity ! Now 2 seems waaaay too much. 
                 prior.append([-0.1,0.1]) ## Radial velocity ! Now 2 seems waaaay too much. 
                 prior.append([-0.0,0.0])
-                prior.append([-0.0,0.0])
-                prior.append([-0.0,0.0])
-                prior.append([-0.0,0.0])
-                prior.append([-0.0,0.0])
-                prior.append([-0.0,0.0])
+                # prior.append([-0.0,0.0])
+                # prior.append([-0.0,0.0])
+                # prior.append([-0.0,0.0])
+                # prior.append([-0.0,0.0])
+                # prior.append([-0.0,0.0])
                 prior=np.array(prior)
                 x=np.array(u)
                 for i in range(0,len(x)):
                     x[i]=prior[i][0]+(prior[i][1]-prior[i][0])*u[i]
                 return x
-            print('mark 3 {}'.format(time.time()))
+
+            etime = time.time()
+            print('mark 3 {:0.2f}'.format(etime-itime))
+            itime = time.time()
 
             ## PIC The DynamicNestedSampler is apparently used to obtain some sort of a 
             ## first guess on the first two parameters, i.e. on the INTENSITY of the spectrum 
             ## and the overal stretch.
             ## Why don't we get a value of the main RV as well? How can that work at all if we
             ## do not account for the RV shift?
-            dsampler=DynamicNestedSampler(loglike,ptform,ndim,bound='multi')
+            # dsampler=DynamicNestedSampler(loglike,ptform,ndim,bound='multi')
             #        sampler=NestedSampler(loglike,ptform,ndim,bound='multi')
-            dsampler.run_nested(maxcall=12000, print_progress=False)
+            # dsampler.run_nested(maxcall=12000, print_progress=False)
             #        sampler.run_nested(dlogz=0.05)
 
             ## Where is the dsampler maximal? 
-            best=np.where(dsampler.results.logl==np.max(dsampler.results.logl))[0][0]
+            # best=np.where(dsampler.results.logl==np.max(dsampler.results.logl))[0][0]
+
+            ## PIC: I am very surprised to see that this Dynamic sampler does not even find the 
+            ## best solution. By doing a simple grid search I actually get values that are closer
+            ## to the maximum likelihood. Perhaps is it poorly parametrized here. Because it's slow,
+            ## I replace it with a simple mini-grid search to help the optimization process later on.
+            ## Plus with this grid, I am sure of what I am feeding scipy optimize.
+            ## This solution is about 15 times faster as the previous implementation.
+            #
+            q0 = np.arange(0., 5., 0.1)
+            q1 = np.arange(-0.1, 0.1, 0.01)
+            # q2 = np.array([0])
+            vals = []; combis = []
+            for _q0 in q0:
+                for _q1 in q1:
+                    val = loglike(np.array([_q0, _q1, 0.]))
+                    vals.append(val)
+                    combis.append([_q0, _q1])
+            pos = np.where(vals==np.max(vals))[0][0]
+            _params = combis[pos]
 #        best=np.where(sampler.results.logl==np.max(sampler.results.logl))[0][0]
 
             '''now run gradient descent to find higher-order corrections to get best match'''    
-            params=np.append(dsampler.results.samples[best],np.array([0.,0.,0.,0.,0.]))
-
+            # params=np.append(dsampler.results.samples[best],np.array([0.]))#,0.,0.,0.,0.]))
+            params = np.append(_params, np.array([0.]))
             #### ---------------
             ## PIC: Now we debug: let's look at the spectra and how the previous method estimates the
             ## stretch and flux.
@@ -2167,7 +2190,9 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
             # embed()
             #### ---------------
 
-            print('mark 3.5 {}'.format(time.time()))
+            etime = time.time()
+            print('mark 3.5 {:0.2f}'.format(etime-itime))
+            itime = time.time()
 
             shiftstretch=scipy.optimize.minimize(my_func,params,method='Powell')
             # enablePrint()
