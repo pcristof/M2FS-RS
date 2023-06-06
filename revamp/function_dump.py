@@ -2432,7 +2432,7 @@ def get_columnspec(data,trace_step,n_lines,continuum_rejection_low,continuum_rej
         apertures_initial0=find_lines_derivative(spec_contsub,flux_threshold=threshold_factor*rms0)#find peaks in continuum-subtracted "spectrum"
 #        apertures_profile0=get_aperture_profile(spec1d0,window)
 
-        apertures_profile0=get_aperture_profile_fast(apertures_initial0,spec1d0,continuum0,window)
+        apertures_profile0=get_aperture_profile(apertures_initial0,spec1d0,continuum0,window)
         columnspec0=m2fs.columnspec(columns=col0,spec=spec1d0.data,mask=spec1d0.mask,err=spec1d0.uncertainty,pixel=pixel0,continuum=continuum0,rms=rms0,apertures_initial=apertures_initial0,apertures_profile=apertures_profile0)#have to break up spec1d into individual data/mask/uncertainty fields in order to allow pickling of columnspec_array
 #        columnspec0=columnspec(columns=col0,spec=spec1d0,mask=spec1d0.mask,err=spec1d0.uncertainty,pixel=pixel0,continuum=continuum0,rms=rms0,apertures_initial=apertures_initial0,apertures_profile=apertures_profile0)#have to break up spec1d into individual data/mask/uncertainty fields in order to allow pickling of columnspec_array
 #        columnspec0.apertures_profile=apertures_profile0
