@@ -1135,6 +1135,60 @@ def on_key_find(event,args_list):
 
 from scipy.interpolate import interp1d
 
+# def generate_line_list_table(xvals):
+#     from astropy.table.table import QTable
+#     qtable = QTable()
+#     qtable['line_center'] = [xvals[i] for i]
+#     list(
+#         itertools.chain(
+#             *[spectrum.spectral_axis.value[emission_inds],
+#               spectrum.spectral_axis.value[absorption_inds]]
+#         )) * spectrum.spectral_axis.unit
+#     qtable['line_type'] = ['emission'] * len(emission_inds) + \
+#                           ['absorption'] * len(absorption_inds)
+#     qtable['line_center_index'] = list(
+#         itertools.chain(
+#             *[emission_inds, absorption_inds]))
+
+#     return qtable
+
+
+def my_find_lines_derivative(y, flux_threshold=None):
+    ## Search for the emission lines:
+    ny = np.copy(y)
+    nx = np.arange(len(y))
+    
+    ## Let's try interpolating to be more accurate
+    # x = np.arange(len(ny))
+    # f = interp1d(x, ny, kind='quadratic')
+    # nx = np.linspace(0, len(ny)-1, 100*len(ny))
+    # ny = f(nx)
+    diffs = np.diff(ny)
+
+    diffs[diffs>0] = 1
+    diffs[diffs<0] = -1
+    diffs = np.diff(diffs)
+    idx = np.where(diffs<0)
+    nidx = idx[0]+1
+    diffnidx = np.diff(nx[nidx])
+
+    issuewith = np.where(diffnidx<2)[0]
+    if len(issuewith)>0:
+        for ii in issuewith[::-1]:
+            iii = nidx[ii]
+            iiii = nidx[ii+1]
+            if ny[iiii]>ny[iii]: todelete=ii
+            if ny[iiii]<=ny[iii]: todelete=ii+1
+            nidx = np.delete(nidx, todelete)
+
+    # from IPython import embed
+    # embed()
+
+    idxval = np.where(ny[nidx] > flux_threshold)
+    subx = nx[nidx]
+    valid_idx = subx[idxval] - 1 ## Not even sure about - 1 but it is to be consitent with the function I am replacing
+    return valid_idx
+
 def peak_finder(y, ths=1/20, med=1):
     '''This function finds the bin corresponding to the maxima in the y array'''
     ny = np.copy(y)
@@ -2285,8 +2339,7 @@ def get_fitlines(extract1d,continuum_rejection_low,continuum_rejection_high,cont
     return continuum0,spec_contsub,fit_lines
 
 def get_aperture_profile(apertures_initial,spec1d,continuum,window):
-    import numpy as np
-
+    
     subregion=[]
     g_fit=[]
     realvirtual=[]#1 for real aperture, 0 for virtual aperture (ie a placeholder aperture for bad/unplugged fiber etc.)
@@ -2301,19 +2354,21 @@ def get_aperture_profile(apertures_initial,spec1d,continuum,window):
         initial.append(True)
     return m2fs.aperture_profile(g_fit,subregion,realvirtual,initial)
 
-def fit_aperture(spec,window,x_center):
-    import numpy as np
-    import matplotlib
-    import matplotlib.pyplot as plt
-    from specutils.manipulation import extract_region
-    from specutils import SpectralRegion
-    from specutils.manipulation import extract_region
-    import astropy.units as u
-    from specutils.spectra import Spectrum1D
-    from specutils.fitting import estimate_line_parameters
-    from astropy.modeling import models,fitting
-    from specutils.fitting import fit_lines
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+from specutils.manipulation import extract_region
+from specutils import SpectralRegion
+from specutils.manipulation import extract_region
+import astropy.units as u
+from specutils.spectra import Spectrum1D
+from specutils.fitting import estimate_line_parameters
+from astropy.modeling import models,fitting
+from specutils.fitting import fit_lines
 
+def fit_aperture(spec,window,x_center):
+    '''Function fitting a gaussian to spec searching for 
+    the shape in the window centered on x_center.'''
     val1=x_center-window/2.#window for fitting aperture
     val2=x_center+window/2.#window for fitting aperture
     subregion0=SpectralRegion(val1*u.AA,val2*u.AA)#define extraction region from window
@@ -2420,7 +2475,7 @@ def get_columnspec(data,trace_step,n_lines,continuum_rejection_low,continuum_rej
 #    apertures_profile=[]
     columnspec_array=[]
     for i in range(0,len(trace_cols)-1):
-        print('working on '+str(i+1)+' of '+str(len(trace_cols))+' trace columns')
+        # print('working on '+str(i+1)+' of '+str(len(trace_cols))+' trace columns')
         col0=np.arange(n_lines)+trace_cols[i]
         spec1d0=m2fs.column_stack(data,col0)
 #        np.pause()
@@ -2430,6 +2485,15 @@ def get_columnspec(data,trace_step,n_lines,continuum_rejection_low,continuum_rej
         spec_contsub.uncertainty.quantity.value[:]=rms0
 #        spec_contsub.mask[:]=False
         apertures_initial0=find_lines_derivative(spec_contsub,flux_threshold=threshold_factor*rms0)#find peaks in continuum-subtracted "spectrum"
+        # xvals = my_find_lines_derivative(spec_contsub.data,flux_threshold=threshold_factor*rms0)
+        # from astropy.table.table import QTable
+        # qtable = QTable()
+        # qtable['line_center'] = np.array(xvals, dtype=float)*u.AA
+        # qtable['line_type'] = ['emission' for i in range(len(xvals))]
+        # qtable['line_center_index'] = xvals
+        # apertures_initial0 = qtable
+        # from IPython import embed
+        # embed()
 #        apertures_profile0=get_aperture_profile(spec1d0,window)
 
         apertures_profile0=get_aperture_profile(apertures_initial0,spec1d0,continuum0,window)
@@ -2447,23 +2511,6 @@ def get_columnspec(data,trace_step,n_lines,continuum_rejection_low,continuum_rej
         print('Working for column {} / {}'.format(i, len(trace_cols)))
 #    return columnspec(columns=col,spec1d=spec1d,pixel=pixel,continuum=continuum,rms=rms,apertures_initial=apertures_initial,apertures_profile)
     return columnspec_array
-
-def get_aperture_profile(apertures_initial,spec1d,continuum,window):
-    import numpy as np
-
-    subregion=[]
-    g_fit=[]
-    realvirtual=[]#1 for real aperture, 0 for virtual aperture (ie a placeholder aperture for bad/unplugged fiber etc.)
-    initial=[]#1 for apertures identified automatically, 0 for those identified by hand
-
-    for j in range(0,len(apertures_initial)):
-        x_center=apertures_initial['line_center'][j].value
-        subregion0,g_fit0=fit_aperture(spec1d-continuum(spec1d.spectral_axis.value),window,x_center)
-        subregion.append(subregion0)
-        g_fit.append(g_fit0)
-        realvirtual.append(True)
-        initial.append(True)
-    return m2fs.aperture_profile(g_fit,subregion,realvirtual,initial)
 
 def get_aperture_profile_fast(apertures_initial,spec1d,continuum,window):
     import numpy as np
