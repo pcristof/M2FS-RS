@@ -11,6 +11,7 @@ import numpy as np
 from astropy import time, coordinates as coord, units as u
 from astropy.nddata import StdDevUncertainty
 from astropy.io import fits
+from irap_tools import normalizationTools as norm_tools
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -305,7 +306,7 @@ class ReduceM2FS:
             if len(sl)>7:
                 arc_ref = int(float(sl[7]))
             else:
-                arc_ref = led_list[0]
+                arc_ref = arc_list[0]
             list_dict[utdate]['led_ref'] = led_ref
             list_dict[utdate]['arc_ref'] = arc_ref
         f.close()
@@ -1915,6 +1916,8 @@ class ReduceM2FS:
         '''This function writes the output fits file for the reduction.
         The goal is to put everything in a single file for the stacked frames.
         Right now it does support nor save the sky corrected spectra.
+        NB: For now I assume that there was only one flat and one calibration frame used,
+        and therefore assume that they were not stacked.
         '''
 
         # from IPython import embed
@@ -1932,10 +1935,14 @@ class ReduceM2FS:
         stack_array_file = self.stack_array_files_nosky[self.ccd] ## File with NO sky correctoin
         stack_array_file_flat_nosky = self.stack_array_files_flat_nosky[self.ccd] ## File with NO sky AFTER flat correction
         ref_array_file_flat = self.ref_array_files_flat[self.ccd] ## File with NO sky AFTER flat correction
+        arc_array_file_flat = self.extract1d_flatfield_array_files[(self.ccd, self.arc_ref)] ## Ref calibration AFTER flat correction
+        arc_array_file_noflat = self.extract1d_array_files[(self.ccd, self.arc_ref)] ## Ref calibration BEFORE flat correction
         stack_wavcal_array=pickle.load(open(stack_wavcal_array_file,'rb'))
         stack_array=pickle.load(open(stack_array_file,'rb'))
         stack_array_flat=pickle.load(open(stack_array_file_flat_nosky,'rb'))
         ref_array_flat=pickle.load(open(ref_array_file_flat,'rb'))
+        arc_array_flat=pickle.load(open(arc_array_file_flat,'rb'))
+        arc_array_noflat=pickle.load(open(arc_array_file_noflat,'rb'))
         # Converting to numpy arrays
         naps = len(stack_array)
         npoints = len(stack_array[0].spec1d_flux.value)
@@ -1944,6 +1951,8 @@ class ReduceM2FS:
         myerror = np.empty((naps, npoints))
         myspecflat = np.empty((naps, npoints))
         myflat = np.empty((naps, npoints))
+        myarc = np.empty((naps, npoints))
+        myarcflat = np.empty((naps, npoints))
         for ap in range(naps):
             _wvl = stack_wavcal_array[ap].wav
             if len(_wvl)==0: _wvl = np.arange(npoints) ## To avoid shape mismatches
@@ -1952,6 +1961,8 @@ class ReduceM2FS:
             myspecflat[ap] = stack_array_flat[ap].spec1d_flux.value
             myflat[ap] = ref_array_flat[ap]
             myerror[ap] = stack_array[ap].spec1d_uncertainty.array
+            myarcflat[ap] = arc_array_flat[ap].spec1d_flux.value
+            myarc[ap] = arc_array_noflat[ap].spec1d_flux.value
         #
         hdu = fits.PrimaryHDU()
         hdu.header['OBJECT'] = (headers['OBJECT'], 'object observed')
@@ -1970,7 +1981,9 @@ class ReduceM2FS:
         hdu3 = fits.ImageHDU(data=myspecflat, name='SPECFLAT')
         hdu4 = fits.ImageHDU(data=myflat, name='FLAT')
         hdu5 = fits.ImageHDU(data=myspec, name='ERROR')
-        hdul = fits.HDUList([hdu, hdu1, hdu2, hdu3, hdu4, hdu5, hdutable])
+        hdu6 = fits.ImageHDU(data=myarc, name='ARC')
+        hdu7 = fits.ImageHDU(data=myarcflat, name='ARCFLAT')
+        hdul = fits.HDUList([hdu, hdu1, hdu2, hdu3, hdu4, hdu5, hdu6, hdu7, hdutable])
         hdul.writeto(self.extract1d_fits_stack[(self.utdate, self.ccd)], overwrite=True)
         #############################
         
@@ -2012,7 +2025,20 @@ class ReduceM2FS:
             reffile = self.extract1d_array_files[(self.ccd, self.led_ref)]     
         led_array = pickle.load(open(reffile, 'rb'))
 
-        for file_id in self.sci_list:
+        ## Get the continuum of the flats
+        continua = []
+        for i in range(len(led_array)):
+            meanflatspec = np.nanmax(led_array[i].spec1d_flux)
+            flatspec = led_array[i].spec1d_flux / meanflatspec
+            smoothflatspec, c = norm_tools.moving_median(flatspec, 10)
+            c[c<0.1] = np.nan
+            continua.append(c)
+        pickle.dump(continua, open(self.ref_array_files_flat[self.ccd], 'wb'))
+
+
+        mylist = [self.sci_list[i] for i in range(len(self.sci_list))]
+        mylist.append(self.arc_ref)
+        for file_id in mylist:
             if self.throughputcorr_bool:
                 infile = self.tmppath + "{}{:04d}-throughputcorr-array.pickle".format(self.ccd, file_id)
                 outfile = self.extract1d_flatfield_array_files[(self.ccd, file_id)]            
@@ -2026,38 +2052,8 @@ class ReduceM2FS:
                     print('will overwrite {}'.format(outfile))
 
                 sci_array = pickle.load(open(infile, 'rb'))
-                continnua = []
                 for i in range(len(sci_array)):
-                    meanflatspec = np.nanmax(led_array[i].spec1d_flux)
-                    flatspec = led_array[i].spec1d_flux / meanflatspec
-                    # from IPython import embed
-                    # embed()
-                    from irap_tools import normalizationTools as norm_tools
-                    smoothflatspec, c = norm_tools.moving_median(flatspec, 10)
-                    # smoothflatspec, c2 = norm_tools.moving_median(sci_array[i].spec1d_flux, 50)
-
-                    c[c<0.1] = np.nan
-
-                    # plt.figure()
-                    # plt.plot(led_array[i].spec1d_flux)
-                    # # plt.plot(c)
-                    # plt.show()
-
-
-                    # plt.figure()
-                    # # plt.plot(sci_array[i].spec1d_flux)
-                    # plt.plot(sci_array[i].spec1d_flux / c)
-                    # plt.show()
-                    
-                    sci_array[i].spec1d_flux = sci_array[i].spec1d_flux / c
-                    
-                    # plt.plot(sci_array[i].spec1d_flux)
-
-                    # plt.plot(flatspec)
-                    # plt.show()
-                    continnua.append(c)
-
+                    sci_array[i].spec1d_flux = sci_array[i].spec1d_flux / continua[i]
                 pickle.dump(sci_array, open(outfile, 'wb'))
-                pickle.dump(continnua, open(self.ref_array_files_flat[self.ccd], 'wb'))
 
         self.flat_field_bool = True
