@@ -510,7 +510,7 @@ class ReduceM2FS:
         if filename is not None:
             plugmapdic = fdump.gen_plugmap_from_file(filename, self.ccd)
         else:
-            plugmapdic = fdump.gen_plugmap(self.filedict[(self.ccd, self.all_list[0])])
+            plugmapdic = fdump.gen_plugmap(self.filedict[(self.ccd, self.sci_list[0])])
 
         apertures, identifiers, objtypes = fdump.order_fibers(plugmapdic, self.ccd, self.filter)
 
