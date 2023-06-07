@@ -18,7 +18,7 @@ Example, notebook, manual to come.
 - Right now the program will fail if there is no sky apertures on the CCD currently being reduced.
 Future improvements should include checking that there are sky apertures and not correcting for sky if there are none,
 as well as using the sky from the other ccd if they are all placed on the only one ccd.
-
+- There is probably an error in the plugmap generation for the blue filter at this point. The tricky part comes from that some apertures are unused but still evidently plugged on sky.
 
 # ----- QUICK START GUIDE -----
 
