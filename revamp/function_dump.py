@@ -2056,6 +2056,89 @@ def get_skysubtract(meansky,i,throughputcorr_array,wavcal_array, normalized=Fals
     skysubtract=m2fs.extract1d(throughputcorr_array[i].aperture,spec1d_pixel=throughputcorr_array[i].spec1d_pixel,spec1d_flux=skysubtract0.flux,spec1d_uncertainty=skysubtract0.uncertainty,spec1d_mask=skysubtract0.mask)
     return sky,skysubtract
 
+from numba import jit
+@jit(nopython=True, cache=True)
+def interpolate_numba(x, x1, y1):
+    """return array interpolated along time-axis to fill missing values"""
+    result = np.zeros_like(x, dtype=np.int16)
+    ## 
+    stop = False
+    i=0
+    while x[i]<x1[0]:
+        result[i] = y1[i]
+        i+=1
+    for i in range(len(x)):
+        if x[i]>x1[-1]:
+            result[i] = y1[-1]
+        else:
+            for j in range(len(x1)):
+                if x[i]<x1[j]:
+                    a = (y1[j]-y1[j-1])/(x1[j]-x1[j-1])
+                    b = y1[j-1] - a*x1[j-1]
+                    result[i] = a*x[i] + b
+                    break
+    return result
+#
+@jit(nopython=True)
+def get_interp_numba(q, x0, y0, pixel0_template, pixelscale_template, xref):
+        xscale=(x0-pixel0_template)/pixelscale_template
+        # x1=q[1]*pixelscale_template+x0*(1.+np.polynomial.polynomial.polyval(xscale,q[2:]))
+        x1=q[1]*pixelscale_template+x0*(1.+0)
+        interp=q[0]*np.interp(xref,x1,y0)
+        # interp = y0
+        # print(xref[0], xref[-1])
+        # print(x1[0], x1[-1])
+        # interp=q[0]*interpolate_numba(xref,x1,y0)
+        return interp
+#
+@jit(nopython=True)
+def my_func_numba(q, x0, y0, pixel0_template, pixelscale_template, xref, fluxref):
+    '''Function computing the residuals between the new spectrum and the template'''
+    interp=get_interp_numba(q, x0, y0, pixel0_template, pixelscale_template, xref)
+    diff2=(fluxref-interp)**2
+    return np.sum(diff2)
+#
+@jit(nopython=True)
+def loglike_numba(q, x0, y0, pixel0_template, pixelscale_template, xref, fluxref):
+    '''Log likelihood for fit'''
+    return -0.5*my_func_numba(q, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+#
+@jit(nopython=True)
+def guess_params_numba_descent(q0, q1, x0, y0, pixel0_template, pixelscale_template, xref, fluxref):
+    # q0 = np.arange(0., 5., 0.01)
+    # q1 = np.arange(-0.1, 0.1, 0.001)
+    i=0
+    refval = -np.inf
+    for _q0 in q0:
+        for _q1 in q1:
+            val = loglike_numba(np.array([_q0, _q1, 0.]), x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+            if val > refval:
+                refval = val
+                q0out = _q0
+                q1out = _q1
+            i+=1
+    return q0out, q1out
+#
+# @jit(nopython=True)
+def guess_params_numba(x0, y0, pixel0_template, pixelscale_template, xref, fluxref):
+    ## Initial grid
+    q0 = np.arange(0., 5., .5)
+    q1 = np.arange(-0.1, 0.1, 0.05)
+    _q0, _q1 = guess_params_numba_descent(q0, q1, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+    ## new grid placing this in the center
+    q0 = np.arange(_q0-1.5, _q0+2, 0.025)
+    q1 = np.arange(_q1-0.15, _q1+0.2, 0.0025)
+    _q0, _q1 = guess_params_numba_descent(q0, q1, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+    ## new grid placing this in the center
+    q0 = np.arange(_q0-0.05, _q0+0.1, 0.0125)
+    q1 = np.arange(_q1-0.005, _q1+0.005, 0.00125)
+    _q0, _q1 = guess_params_numba_descent(q0, q1, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+    ## new grid placing this in the center
+    q0 = np.arange(_q0-0.025, _q0+0.1, 0.0062)
+    q1 = np.arange(_q1-0.0025, _q1+0.005, 0.00062)
+    _q0, _q1 = guess_params_numba_descent(q0, q1, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+    return _q0, _q1
+
 def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,linelist,continuum_rejection_low,
                            continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order,
                            threshold_factor,window,id_lines_order,id_lines_rejection_iterations,
@@ -2216,33 +2299,44 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
             ## Plus with this grid, I am sure of what I am feeding scipy optimize.
             ## This solution is about 15 times faster as the previous implementation.
             #
-            q0 = np.arange(0., 5., 0.1)
-            q1 = np.arange(-0.1, 0.1, 0.01)
-            # q2 = np.array([0])
-            vals = []; combis = []
-            for _q0 in q0:
-                for _q1 in q1:
-                    val = loglike(np.array([_q0, _q1, 0.]))
-                    vals.append(val)
-                    combis.append([_q0, _q1])
-            pos = np.where(vals==np.max(vals))[0][0]
-            _params = combis[pos]
+            # x0, y0, pixel0_template, pixelscale_template, xref, fluxref
+            _x0 = np.array(spec_contsub_template_xaxis_value[use_template],dtype=float)
+            _y0 = np.array(spec_contsub_template_flux_value[use_template], dtype=float)
+            _xref = np.array(spec_contsub.spectral_axis.value[use], dtype=float)
+            _fluxref = np.array(spec_contsub.flux.value[use], dtype=float)
+            q1, q2 = guess_params_numba(_x0, _y0, pixel0_template, pixelscale_template, _xref, _fluxref)
+            # get_interp_numba(params, _x0, _y0, pixel0_template, pixelscale_template, _xref)
+            # pos = np.where(vals==np.max(vals))[0][0]
+            # _params = combis[pos]
+            _params = np.array([q1, q2])
+            # q0 = np.arange(0., 5., 0.1)
+            # q1 = np.arange(-0.1, 0.1, 0.01)
+            # # q2 = np.array([0])
+            # vals = []; combis = []
+            # for _q0 in q0:
+            #     for _q1 in q1:
+            #         val = loglike(np.array([_q0, _q1, 0.]))
+            #         vals.append(val)
+            #         combis.append([_q0, _q1])
+            # pos = np.where(vals==np.max(vals))[0][0]
+            # _params = combis[pos]
 #        best=np.where(sampler.results.logl==np.max(sampler.results.logl))[0][0]
 
             '''now run gradient descent to find higher-order corrections to get best match'''    
             # params=np.append(dsampler.results.samples[best],np.array([0.]))#,0.,0.,0.,0.]))
             params = np.append(_params, np.array([0.]))
-            #### ---------------
-            ## PIC: Now we debug: let's look at the spectra and how the previous method estimates the
-            ## stretch and flux.
+            # ### ---------------
+            # # PIC: Now we debug: let's look at the spectra and how the previous method estimates the
+            # # stretch and flux.
             # interp=get_interp(params)#,spec_contsub,spec_contsub_template,use,use_template,pixel0_template,pixelscale_template)
             # plt.figure()
+            # plt.plot(spec_contsub_template_flux_value[use_template])
             # plt.plot(spec_contsub.flux.value[use])
             # plt.plot(interp, '--')
             # plt.show()
             # from IPython import embed
             # embed()
-            #### ---------------
+            # ### ---------------
 
             etime = time.time()
             print('mark 3.5 {:0.2f}'.format(etime-itime))
@@ -2252,6 +2346,19 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
             # enablePrint()
             # interp=get_interp(shiftstretch.x) ## Unused
             print('log likelihood/1e9 = ',loglike(shiftstretch.x)/1.e9)
+
+            # # ### ---------------
+            # # PIC: Now we debug: let's look at the spectra and how the previous method estimates the
+            # # stretch and flux.
+            # interp=get_interp(shiftstretch.x)#,spec_contsub,spec_contsub_template,use,use_template,pixel0_template,pixelscale_template)
+            # plt.figure()
+            # plt.plot(spec_contsub_template_flux_value[use_template])
+            # plt.plot(spec_contsub.flux.value[use])
+            # plt.plot(interp, '--')
+            # plt.show()
+            # from IPython import embed
+            # embed()
+            # # ### ---------------
 
             # found=0 ## Unused
             id_lines_pix=[]
@@ -3034,7 +3141,8 @@ def gen_plugmap_from_file(filename, ccd):
 
 def order_halphali(plugmapdic, cassettes_order):
     '''Function to orde the Halpha-Li filter.
-    The order has two consecutive orders.'''
+    The order has two consecutive orders.
+    In this mode, I assume that only impair '''
 
     objtypes = []
     apertures = []
@@ -3044,7 +3152,9 @@ def order_halphali(plugmapdic, cassettes_order):
     aperture=1 ## We're gonna count the apertures
     for cassette in cassettes_order:
         for fibernb in range(16, 0, -1): ## from top to botton, for both ccd is the same
-            if 'unused' in plugmapdic[cassette][fibernb]['objtype']: continue
+            # if 'unused' in plugmapdic[cassette][fibernb]['objtype']: continue
+            ## In this mode I assume that only fibers with impair numbers are being used.
+            if fibernb%2==0: continue
             # First order
             apertures.append(aperture)
             objtypes.append(plugmapdic[cassette][fibernb]['objtype'])
@@ -3065,12 +3175,13 @@ def order_halphali(plugmapdic, cassettes_order):
     ## maximum, since I see many more with the blue filter. And with Novembder Halpha-Li data
     ## We have only 120 plugged fibers, but still 128 traces...
 
-    while len(fibers)<128: 
-        apertures.append(aperture)
-        objtypes.append('UNUSED')
-        identifiers.append('')
-        fibers.append('FIBER{}{:02d}'.format(cassette, fibernb))
-        aperture+=1
+    ## THIS WILL NOT WORK BECAUSE I WOULD END UP ADDING IMPROPER LABELS TO THE FIBERS !
+    # while len(fibers)<128: 
+    #     apertures.append(aperture)
+    #     objtypes.append('UNUSED')
+    #     identifiers.append('')
+    #     fibers.append('FIBER{}{:02d}'.format(cassette, fibernb))
+    #     aperture+=1
     
     return apertures, identifiers, objtypes
 
