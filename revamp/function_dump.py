@@ -3200,17 +3200,17 @@ def order_dupreeblue(plugmapdic, cassettes_order):
         for fibernb in range(16, 0, -2): ## from top to botton, for both ccd is the same
             if 'unused' in plugmapdic[cassette][fibernb]['objtype']: continue
             for order in range(4,0,-1):
-                # First order, first fiber
+                # first fiber
                 apertures.append(aperture)
                 objtypes.append(plugmapdic[cassette][fibernb]['objtype'])
                 identifiers.append(plugmapdic[cassette][fibernb]['identifier'])
-                fibers.append('FIBER{}{:02d}{}'.format(cassette, fibernb))
+                fibers.append('FIBER{}{:02d}'.format(cassette, fibernb))
                 aperture+=1
-                # First order, second fiber
+                # second fiber
                 apertures.append(aperture)
                 objtypes.append(plugmapdic[cassette][fibernb-1]['objtype'])
                 identifiers.append(plugmapdic[cassette][fibernb-1]['identifier'])
-                fibers.append('FIBER{}{:02d}{}'.format(cassette, fibernb-1))
+                fibers.append('FIBER{}{:02d}'.format(cassette, fibernb-1))
                 aperture+=1
 
     ## We may be having less than 128 apertures, and yet, our program currently needs 128
