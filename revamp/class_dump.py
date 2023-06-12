@@ -513,11 +513,13 @@ class ReduceM2FS:
         else:
             plugmapdic = fdump.gen_plugmap(self.filedict[(self.ccd, self.sci_list[0])])
 
-        apertures, identifiers, objtypes = fdump.order_fibers(plugmapdic, self.ccd, self.filter)
+        apertures, identifiers, objtypes, fibers = fdump.order_fibers(plugmapdic, self.ccd, self.filter)
 
         objcol = fits.Column(name='OBJTYPE',format='A6',array=objtypes)
         apcol = fits.Column(name='APERTURE',format='I',array=apertures)
-        cols=fits.ColDefs([objcol, apcol])
+        fibcol = fits.Column(name='FIBERS',format='A8',array=fibers)
+        idcol = fits.Column(name='IDENTIFIERS',format='A10',array=identifiers)
+        cols=fits.ColDefs([objcol, apcol, fibcol, idcol])
         plugmap_table_hdu=fits.FITS_rec.from_columns(cols)
 
         # ## We then take the first file headers: 
@@ -584,6 +586,89 @@ class ReduceM2FS:
             # from IPython import embed
             # embed()
         
+    def check_plugmap(self):
+        
+        plugmap = pickle.load(open(self.plugmap_file, 'rb'))
+        apertures = plugmap['APERTURE']
+        objtypes = plugmap['OBJTYPE']
+        ids = plugmap['IDENTIFIERS']
+        fibers = plugmap['FIBERS']
+
+        # options = [fibers[i] for i in range(len(fibers))]
+        myccd = self.ccd.upper()
+        options = []
+        for cassette in range(1, 9):
+            for fiber in range(1, 17):                    
+                options.append("FIBER{}{:02d}".format(cassette, fiber))
+        texts = {}
+        for ii, fiber in enumerate(fibers):
+            texts[fiber] = fiber + " - " + ids[ii].upper()
+        for option in options:
+            if option not in fibers:
+                texts[option] = option + " - UNPLUG"
+        import tkinter as tk
+
+        def show_selection():
+            selected_options = [option for option, value in checkboxes.items() if value.get()]
+            num_checked_boxes.set(f"Number selected fibers: {len(selected_options)}\n"
+                                  + "Filter: {}".format(self.filter))
+            print("Selected options:", selected_options)
+        
+        def continue_execution():
+            # Add your desired code here to continue the execution after breaking the main loop
+            window.destroy()
+            print("Continuing the code execution...")
+
+        # Create the main window
+        window = tk.Tk()
+
+        # Set the title of the window
+        window.title("Fibers selection")
+
+        # Create a dictionary to store the checkbutton variables
+        checkboxes = {}
+
+        # Create the multiple choice checkbuttons
+        # options = ["Option 1", "Option 2", "Option 3", "Option 4", "Option 5", "Option 6", "Option 7", "Option 8", "Option 9", "Option 10"]
+        j=0
+        counter = 0
+        offset = 0
+        for i, option_text in enumerate(options):
+            checkboxes[option_text] = tk.BooleanVar(value=False)  # Set default value to False
+            checkbox = tk.Checkbutton(window, text=texts[option_text], variable=checkboxes[option_text])
+            # checkbox.pack()
+            # checkbox.grid(row=i // 5, column=0, sticky="w")
+            if counter>len(options)//4: j+=1; offset+=counter; counter=0; print(j)
+            counter+=1
+            checkbox.grid(row=i-offset, column=j, sticky="w")
+
+        # Set options 4, 7, and 2 to be checked by default
+        for fiber in fibers:
+            checkboxes[fiber].set(True)
+        # checkboxes["Option 4"].set(True)
+        # checkboxes["Option 7"].set(True)
+        # checkboxes["Option 2"].set(True)
+
+        # Create a button to show the selected options
+        button = tk.Button(window, text="Show Selection", command=show_selection)
+        # button.grid(row=(len(options) // 5) + 1, column=0, columnspan=5)
+        button.grid(row=len(options) + 1, column=0, columnspan=5)
+        # button.pack()
+
+        # Create a button to break the main loop and continue the code execution
+        button_continue_execution = tk.Button(window, text="Continue Execution", command=continue_execution)
+        button_continue_execution.grid(row=len(options) + 2, column=0, columnspan=5)
+
+
+        ## Add a label showing the total number of selected fibers
+        num_checked_boxes = tk.StringVar()
+        label = tk.Label(window, textvariable=num_checked_boxes)
+        label.grid(row=len(options) + 3, column=0, columnspan=5)
+
+        # Start the main event loop
+        window.mainloop()
+
+
     def auto_trim(self, led_id=None):
         '''This function will launch an interactive window to trim
         the image so that the user can choose the region to analyze.

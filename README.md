@@ -19,6 +19,8 @@ Example, notebook, manual to come.
 Future improvements should include checking that there are sky apertures and not correcting for sky if there are none,
 as well as using the sky from the other ccd if they are all placed on the only one ccd.
 - There is probably an error in the plugmap generation for the blue filter at this point. The tricky part comes from that some apertures are unused but still evidently plugged on sky.
+- Right now the plugmap will be wrong for the bluefilter if all apertures are not accounted for. They will also be wrong for the halpha filter if the number "pair" numbered fibers are used.
+- The currently added check fibers will allow to fix the above the issues by interactively selecting the missing fibers. Right now, it does not store the selection. 
 
 # ----- QUICK START GUIDE -----
 

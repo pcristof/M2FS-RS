@@ -3183,7 +3183,7 @@ def order_halphali(plugmapdic, cassettes_order):
     #     fibers.append('FIBER{}{:02d}'.format(cassette, fibernb))
     #     aperture+=1
     
-    return apertures, identifiers, objtypes
+    return apertures, identifiers, objtypes, fibers
 
 def order_dupreeblue(plugmapdic, cassettes_order):
     '''Function to order the dupreeblue filter.
@@ -3204,13 +3204,13 @@ def order_dupreeblue(plugmapdic, cassettes_order):
                 apertures.append(aperture)
                 objtypes.append(plugmapdic[cassette][fibernb]['objtype'])
                 identifiers.append(plugmapdic[cassette][fibernb]['identifier'])
-                fibers.append('FIBER{}{:02d}{}'.format(cassette, fibernb, order))
+                fibers.append('FIBER{}{:02d}{}'.format(cassette, fibernb))
                 aperture+=1
                 # First order, second fiber
                 apertures.append(aperture)
                 objtypes.append(plugmapdic[cassette][fibernb-1]['objtype'])
                 identifiers.append(plugmapdic[cassette][fibernb-1]['identifier'])
-                fibers.append('FIBER{}{:02d}{}'.format(cassette, fibernb-1, order))
+                fibers.append('FIBER{}{:02d}{}'.format(cassette, fibernb-1))
                 aperture+=1
 
     ## We may be having less than 128 apertures, and yet, our program currently needs 128
@@ -3222,15 +3222,15 @@ def order_dupreeblue(plugmapdic, cassettes_order):
 
     # from IPython import embed
     # embed()
+    ## This also simply cannot work properly.
+    # while len(fibers)<128: 
+    #     apertures.append(aperture)
+    #     objtypes.append('UNUSED')
+    #     identifiers.append('')
+    #     fibers.append('FIBER{}{:02d}'.format(cassette, fibernb))
+    #     aperture+=1
 
-    while len(fibers)<128: 
-        apertures.append(aperture)
-        objtypes.append('UNUSED')
-        identifiers.append('')
-        fibers.append('FIBER{}{:02d}'.format(cassette, fibernb))
-        aperture+=1
-    
-    return apertures, identifiers, objtypes
+    return apertures, identifiers, objtypes, fibers
 
 def order_fibers(plugmapdic, ccd, filter):
     '''Function to order the fiber based on filter and CCD'''
@@ -3241,12 +3241,12 @@ def order_fibers(plugmapdic, ccd, filter):
         cassettes_order = np.arange(1, 9, 1) ## From top to bottom of image
     
     if 'halphali' in filter:
-        apertures, identifiers, objtypes = order_halphali(plugmapdic, cassettes_order)
+        apertures, identifiers, objtypes, fibers = order_halphali(plugmapdic, cassettes_order)
     elif 'dupreeblue' in filter:
-        apertures, identifiers, objtypes = order_dupreeblue(plugmapdic, cassettes_order)
+        apertures, identifiers, objtypes, fibers = order_dupreeblue(plugmapdic, cassettes_order)
     else:
         raise Exception('function_dump.order_fibers: unknown filter, try options: {} | {}'.format('halphali', 'dupreeblue'))
-    return apertures, identifiers, objtypes
+    return apertures, identifiers, objtypes, fibers
 
 
 #### Two functions here to perform a fourier interpolation
