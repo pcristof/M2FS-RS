@@ -856,6 +856,26 @@ class ReduceM2FS:
 
             pickle.dump(aperture_array,open(aperture_array_file,'wb'))
 
+    def check_trace(self):
+        aperture_array_file = self.aperture_array_file
+        image_boundary_file = self.image_boundary_file
+        columnspec_array_file = self.columnspec_array_file
+        apertures_profile_middle_file = self.apertures_profile_middle_file
+        aperture_array_exists=path.exists(aperture_array_file) # Exists?
+        myframe = self.sci_list[2] # self.led_ref
+        flat_file = self.filedict[(self.ccd, myframe)]
+        if aperture_array_exists:
+            aperture_array = pickle.load(open(aperture_array_file,'rb'))
+            image = fits.getdata(flat_file)
+            aps = []
+            for i in range(len(aperture_array)):
+                aps.append(aperture_array[i].trace_func(np.arange(len(image))))
+            plt.figure()
+            plt.imshow(image, vmin=0, vmax=10)
+            for i in range(len(aps)):
+                plt.plot(aps[i], color='black', linewidth=0.3)
+            plt.show()
+
     def apmask(self):
         apmask_file = self.apmask_file
         apertures_profile_middle_file = self.apertures_profile_middle_file
@@ -2065,7 +2085,7 @@ class ReduceM2FS:
         hdu2 = fits.ImageHDU(data=myspec, name='SPEC')
         hdu3 = fits.ImageHDU(data=myspecflat, name='SPECFLAT')
         hdu4 = fits.ImageHDU(data=myflat, name='FLAT')
-        hdu5 = fits.ImageHDU(data=myspec, name='ERROR')
+        hdu5 = fits.ImageHDU(data=myerror, name='ERROR')
         hdu6 = fits.ImageHDU(data=myarc, name='ARC')
         hdu7 = fits.ImageHDU(data=myarcflat, name='ARCFLAT')
         hdul = fits.HDUList([hdu, hdu1, hdu2, hdu3, hdu4, hdu5, hdu6, hdu7, hdutable])
