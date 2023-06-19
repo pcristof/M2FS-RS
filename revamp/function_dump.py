@@ -1836,6 +1836,62 @@ def normalize_old(wvl, flux, err, p=95, hws=150, degree=3):
     norm_err = err/c
     return c
 
+def grab_continuum(wvl, spectrum):
+    '''Function returning the continuum of a simple spectrum
+    This version should be an improvement over the previous versions'''
+    if len(wvl)!=len(spectrum):
+        raise Exception('grab_continuum: input array should have the same sizes.')
+    c = np.ones(len(spectrum))
+    rmsarray = []
+    for k in range(500):
+        ## define the acceptable devaition from the continuum
+        dcont = 0.5
+        degree = 1
+        if k>8:
+            dcont = 0.2
+            degree = 2
+        if k>16:
+            dcont = 0.1
+            degree = 2
+        if k>24:
+            dcont = 0.05
+            degree = 2
+        if k>32:
+            dcont = 0.03
+            degree = 2
+        ## Copy the input arrays
+        w, s = np.array(wvl, dtype=float), np.array(spectrum, dtype=float)
+        ## Compute the smoothed spectrum
+        test, s = norm_tools.moving_median(s, 15, btd=0)
+        ## Mask the pixels strickly equal to 0
+        idx = np.where(s==0.)
+        s[idx] = np.nan
+        ## Mask the pixels that below 0.9 or larger than 1.2 in normalized flux
+        if k!=0:
+            idx = np.where((s/c)<1-dcont)
+            s[idx] = np.nan
+            idx = np.where((s/c)>1+dcont)
+            s[idx] = np.nan
+        ## Compute median and RMS
+        med = np.nanmedian(s/c)
+        rms = np.nanstd(s/c)
+        ## Mask pixels above and below 3*rms
+        idx = np.where((s/c)<(med-3*rms))
+        s[idx] = np.nan
+        idx = np.where((s/c)>(med+3*rms))
+        s[idx] = np.nan
+        ## Fit the continuum on the smoothed spectrum
+        c, ps, coeffs = fit_continuum(wvl=w, flux=s, window_size=9, p=50, degree=degree)
+        ## Store the RMS values
+        rmsarray.append(rms)
+        ## If we have the same RMS 10 times in a row, exit loop
+        if k>10:
+            if round(rms, 4)==round(np.sum(rmsarray[-10:])/10, 4):
+                break ## We are not improving by looping further
+        if k>490:
+            print('grab_continuum: reached the end of the loop')
+    return c, ps
+
 from specutils.spectra import Spectrum1D
 def get_throughput_continuum(twilightstack_array,twilightstack_wavcal_array,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order):
     
@@ -2083,7 +2139,7 @@ def interpolate_numba(x, x1, y1):
 def get_interp_numba(q, x0, y0, pixel0_template, pixelscale_template, xref):
         xscale=(x0-pixel0_template)/pixelscale_template
         # x1=q[1]*pixelscale_template+x0*(1.+np.polynomial.polynomial.polyval(xscale,q[2:]))
-        x1=q[1]*pixelscale_template+x0*(1.+0)
+        x1=q[1]*pixelscale_template+x0*(1.+mynumbapoly(xscale, q[2:]))
         interp=q[0]*np.interp(xref,x1,y0)
         # interp = y0
         # print(xref[0], xref[-1])
@@ -2119,6 +2175,24 @@ def guess_params_numba_descent(q0, q1, x0, y0, pixel0_template, pixelscale_templ
             i+=1
     return q0out, q1out
 #
+@jit(nopython=True)
+def guess_params_numba_descent_3d(q0, q1, q2, x0, y0, pixel0_template, pixelscale_template, xref, fluxref):
+    # q0 = np.arange(0., 5., 0.01)
+    # q1 = np.arange(-0.1, 0.1, 0.001)
+    i=0
+    refval = -np.inf
+    for _q0 in q0:
+        for _q1 in q1:
+            for _q2 in q2:
+                val = loglike_numba(np.array([_q0, _q1, _q2]), x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+                if val > refval:
+                    refval = val
+                    q0out = _q0
+                    q1out = _q1
+                    q2out = _q2
+                i+=1
+    return q0out, q1out, q2out
+#
 # @jit(nopython=True)
 def guess_params_numba(x0, y0, pixel0_template, pixelscale_template, xref, fluxref):
     ## Initial grid
@@ -2138,6 +2212,37 @@ def guess_params_numba(x0, y0, pixel0_template, pixelscale_template, xref, fluxr
     q1 = np.arange(_q1-0.0025, _q1+0.005, 0.00062)
     _q0, _q1 = guess_params_numba_descent(q0, q1, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
     return _q0, _q1
+
+def guess_params_numba_3d(x0, y0, pixel0_template, pixelscale_template, xref, fluxref):
+    ## Initial grid
+    q0 = np.arange(0., 5., .5)
+    q1 = np.arange(-0.1, 0.1, 0.05)
+    q2 = np.arange(-0.1, 0.125, 0.025)
+    _q0, _q1, _q2 = guess_params_numba_descent_3d(q0, q1, q2, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+    ## new grid placing this in the center
+    q0 = np.arange(_q0-1.5, _q0+2, 0.025)
+    q1 = np.arange(_q1-0.15, _q1+0.2, 0.0025)
+    q2 = np.arange(_q2-0.06, _q2+0.08, 0.02)
+    _q0, _q1, _q2 = guess_params_numba_descent_3d(q0, q1, q2, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+    ## new grid placing this in the center
+    q0 = np.arange(_q0-0.05, _q0+0.1, 0.0125)
+    q1 = np.arange(_q1-0.005, _q1+0.005, 0.00125)
+    q2 = np.arange(_q2-0.07, _q2+0.08, 0.01)
+    _q0, _q1, _q2 = guess_params_numba_descent_3d(q0, q1, q2, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+    # ## new grid placing this in the center
+    # q0 = np.arange(_q0-0.025, _q0+0.1, 0.0062)
+    # q1 = np.arange(_q1-0.0025, _q1+0.005, 0.00062)
+    # q2 = np.arange(_q2-0.07, _q2+0.08, 0.01)
+    # _q0, _q1, _q2 = guess_params_numba_descent_3d(q0, q1, q2, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+    return _q0, _q1, _q2
+
+@jit(nopython=True)
+def mynumbapoly(x, c):
+    nbcoeffs = len(c)
+    y = np.zeros(x.shape)
+    for i in range(nbcoeffs):
+        y+=c[i]*x**i
+    return y
 
 def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,linelist,continuum_rejection_low,
                            continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order,
@@ -2304,7 +2409,7 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
             _y0 = np.array(spec_contsub_template_flux_value[use_template], dtype=float)
             _xref = np.array(spec_contsub.spectral_axis.value[use], dtype=float)
             _fluxref = np.array(spec_contsub.flux.value[use], dtype=float)
-            q1, q2 = guess_params_numba(_x0, _y0, pixel0_template, pixelscale_template, _xref, _fluxref)
+            q1, q2, q3 = guess_params_numba_3d(_x0, _y0, pixel0_template, pixelscale_template, _xref, _fluxref)
             # get_interp_numba(params, _x0, _y0, pixel0_template, pixelscale_template, _xref)
             # pos = np.where(vals==np.max(vals))[0][0]
             # _params = combis[pos]
@@ -2324,7 +2429,8 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
 
             '''now run gradient descent to find higher-order corrections to get best match'''    
             # params=np.append(dsampler.results.samples[best],np.array([0.]))#,0.,0.,0.,0.]))
-            params = np.append(_params, np.array([0.]))
+            # params = np.append(_params, np.array([0.1]))
+            params = np.append(_params, np.array([q3]))
             # ### ---------------
             # # PIC: Now we debug: let's look at the spectra and how the previous method estimates the
             # # stretch and flux.
@@ -2412,7 +2518,12 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
 
                 resolution,resolution_rms,resolution_npoints=m2fs.get_resolution(deepcopy(fit_lines),deepcopy(wav),resolution_order,resolution_rejection_iterations)
                 print('mark 5 {}'.format(time.time()))
-
+        # if extract1d.aperture == 99:
+        #     from IPython import embed
+        #     embed()
+        #     plt.figure()
+        #     plt.plot(func[1](np.arange(2000)))
+        #     plt.show()
     return m2fs.id_lines(aperture=extract1d.aperture,fit_lines=fit_lines,wav=wav,func=func[len(func)-1],rms=rms[len(rms)-1],npoints=npoints[len(npoints)-1],resolution=resolution,resolution_rms=resolution_rms,resolution_npoints=resolution_npoints)
             
 def get_fitlines(extract1d,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,threshold_factor,window,continuum_rejection_order):
