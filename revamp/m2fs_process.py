@@ -250,7 +250,7 @@ def plot_boundary(lower_x,lower_y,upper_x,upper_y,reject_x,reject_y,data,fig):
 
 def on_key_boundary(event,args_list):
     import numpy as np
-    import m2fs_process as m2fs
+    # import m2fs_process as m2fs
     from specutils import SpectralRegion
     import astropy.units as u
     from astropy.modeling import models
@@ -308,7 +308,7 @@ def on_key_boundary(event,args_list):
 
 def on_key_find(event,args_list):
     import numpy as np
-    import m2fs_process as m2fs
+    # import m2fs_process as m2fs
     from specutils import SpectralRegion
     import astropy.units as u
     from astropy.modeling import models
@@ -404,7 +404,7 @@ def on_key_find(event,args_list):
 
 def on_key_trace(event,args_list):
     import numpy as np
-    import m2fs_process as m2fs
+    # import m2fs_process as m2fs
     from specutils import SpectralRegion
     import astropy.units as u
     from astropy.modeling import models
@@ -484,7 +484,7 @@ def on_key_trace(event,args_list):
 
 def on_key_id_lines(event,args_list):
     import numpy as np
-    import m2fs_process as m2fs
+    # import m2fs_process as m2fs
     from specutils import SpectralRegion
     import astropy.units as u
     from astropy.modeling import models
@@ -710,7 +710,7 @@ def get_cr_reject(spec1d,cr_rejection_low,cr_rejection_high,cr_rejection_order,c
     
 def column_stack(data,col):
     import numpy as np
-    import mycode
+    from . import mycode
     from ccdproc import Combiner
     import astropy.units as u
     import specutils

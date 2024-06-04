@@ -21,6 +21,7 @@ as well as using the sky from the other ccd if they are all placed on the only o
 - There is probably an error in the plugmap generation for the blue filter at this point. The tricky part comes from that some apertures are unused but still evidently plugged on sky.
 - Right now the plugmap will be wrong for the bluefilter if all apertures are not accounted for. They will also be wrong for the halpha filter if the number "pair" numbered fibers are used.
 - The currently added check fibers will allow to fix the above the issues by interactively selecting the missing fibers. Right now, it does not store the selection. 
+- I have found some data (e.g. with the Blue filter) where one aperture is simply completely disconected. In that case, there is no flux at all, and that may cause problems for aperture identification AND reduction (since we check that the number of apertures is 128 per ccd in the current version of the code).
 
 # ----- QUICK START GUIDE -----
 

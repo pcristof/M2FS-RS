@@ -94,7 +94,7 @@ def zero_corr(filedict, color, ccd, bias_list, outfile, binning):
     ccdall[0].header['egain']=str(gain)
     ccdall.write(outfile, overwrite=True)
 
-def dark_corr(filedict, color, ccd, dark_list, masterbiasfile, outfile, binning):
+def dark_corr(filedict, color, ccd, dark_list, masterbiasfile, outfile, binning, corrbias):
     '''This function performs the initial correction of the data and writes the new data
     to fits files. It is a revamped version of the m2fs_zero_jan20.py script.
     There are still a lot of hardcoded stuff that should really not be.'''
@@ -102,7 +102,10 @@ def dark_corr(filedict, color, ccd, dark_list, masterbiasfile, outfile, binning)
     # revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
     revbin = binning
 
-    master_bias=astropy.nddata.CCDData.read(masterbiasfile)
+    if corrbias:
+        master_bias=astropy.nddata.CCDData.read(masterbiasfile)
+    else:
+        master_bias=0
 
     exptime=[]
     master_debiased=[]
@@ -112,13 +115,22 @@ def dark_corr(filedict, color, ccd, dark_list, masterbiasfile, outfile, binning)
     for i, dark_id in enumerate(dark_list):        
         filename = filedict[(color, ccd, dark_id)]
         data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
-        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,revbin[1]*1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
+        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,revbin[1]*1024:],overscan_axis=1,model=models.Polynomial1D(2),add_keyword={'oscan_corr':'Done'})
+        # oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[revbin[0]*1024:, :],overscan_axis=0,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
+
         trimmed1=ccdproc.trim_image(oscan_subtracted[:,:revbin[1]*1024],add_keyword={'trim1':'Done'})
         trimmed2=ccdproc.trim_image(trimmed1[:revbin[0]*1028,:revbin[1]*1024],add_keyword={'trim2':'Done'})
         exptime.append(data.header['exptime'])
         master_exptime.append(data.header['exptime'])
+        print('EXPOSURE TIME')
+        print(data.header['exptime'])
 
-        debiased0=ccdproc.subtract_bias(trimmed2, master_bias)
+
+        if corrbias:
+            debiased0=ccdproc.subtract_bias(trimmed2, master_bias)
+        else:
+            debiased0=trimmed2
+
         master_debiased.append(debiased0)
         print("Preprocessing dark frames ... {:0.2f}%".format(i/ntot*100), end='\r')
     print("Preprocessing dark frames ... {:0.2f}%".format(i/ntot*100))
@@ -232,7 +244,45 @@ def stitch_frames_nocorr(ccd, file_id, rawfiledict, masterbiasframes, masterdark
     stitched.write(outfile, overwrite=True)
     print("stitch_frames: Done")
 
-def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes, filedict, binning, corrdark=False):
+from numba import jit
+@jit(nopython=True)
+def compute_flux_tile_fast(data, uncertainty, darkdata, darkuncertainty, biasuncertainty, corrdark, gain, exptime_ratio, obs_readnoise, ntot):
+    for k in range(0,len(data)):
+        for q in range(0,len(data[k])):
+            if corrdark:
+                uncertainty[k][q]=(
+                    np.max(np.array([data[k][q]
+                                    +darkdata[k][q]*gain*exptime_ratio
+                                    +2.
+                                    +obs_readnoise**2
+                                    +(darkuncertainty[k][q]*gain*exptime_ratio)**2
+                                    +(biasuncertainty[k][q]*gain)**2,
+                                    0.6*(obs_readnoise**2+(darkuncertainty[k][q]*gain*exptime_ratio)**2
+                                        +(biasuncertainty[k][q]*gain)**2)
+                                    ])
+                            ))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+#                        poop1=(np.max(np.array([data[k][q]+darkdata[k][q]*gain*exptime_ratio+2.+obs_readnoise**2+(darkuncertainty[k][q]*gain*exptime_ratio)**2+(biasuncertainty[k][q]*gain)**2,0.6*(obs_readnoise**2+(darkuncertainty[k][q]*gain*exptime_ratio)**2+(biasuncertainty[k][q]*gain)**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+#                        poop2=(np.max(np.array([data[k][q]+2.+obs_readnoise**2,0.6*(obs_readnoise**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+#                        print(poop1/poop2)
+            else:
+                uncertainty[k][q]=(
+                    np.max(np.array([data[k][q]
+                                    # +darkdata[k][q]*gain*exptime_ratio
+                                    +2.
+                                    +obs_readnoise**2
+                                    # +(darkuncertainty[k][q]*gain*exptime_ratio)**2
+                                    +(biasuncertainty[k][q]*gain)**2,
+                                    0.6*(obs_readnoise**2
+                                        #  +(darkuncertainty[k][q]*gain*exptime_ratio)**2
+                                            +(biasuncertainty[k][q]*gain)**2)
+                                    ])
+                            ))**0.5
+#                cr_cleaned=ccdproc.cosmicray_lacosmic(gain_corrected,sigclip=10)
+    #     print("Uncertainty computation {:0.0f}%".format(k/ntot*100), end='\r')
+    # print("Uncertainty computation {:0.0f}%".format(k/ntot*100))
+    return uncertainty
+
+def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes, filedict, binning, corrdark=False, corrbias=False):
     # for filename in framelist:
     # for file_id in all_list:
     # revbin = np.abs(np.array(binning[::-1])-2)+1 ## Converts binning in factor for immage dimensions
@@ -243,19 +293,29 @@ def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes,
         masterdarkfile = masterdarkframes[(ccd, tile)]
         outfile = filedict[(ccd, file_id)]
 
-        master_bias=astropy.nddata.CCDData.read(masterbiasfile)
-        obs_readnoise=np.float(master_bias.header['obs_rdnoise'])
-        master_dark=astropy.nddata.CCDData.read(masterdarkfile)
-
         data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
         gain=np.float(data.header['egain'])
+
+        if corrbias:
+            master_bias=astropy.nddata.CCDData.read(masterbiasfile)
+            if 'obs_rdnoise' in master_bias.header:
+                obs_readnoise=np.float(master_bias.header['obs_rdnoise'])
+            else:
+                obs_readnoise=0
+        else:
+            master_bias=0
+            obs_readnoise=0
 
         oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,revbin[1]*1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
         trimmed1=ccdproc.trim_image(oscan_subtracted[:,:revbin[1]*1024],add_keyword={'trim1':'Done'})
         trimmed2=ccdproc.trim_image(trimmed1[:revbin[0]*1028,:revbin[1]*1024],add_keyword={'trim2':'Done'})
 
-        debiased0=ccdproc.subtract_bias(trimmed2,master_bias)
+        if corrbias:
+            debiased0=ccdproc.subtract_bias(trimmed2,master_bias)
+        else:
+            debiased0=trimmed2
         if corrdark:
+            master_dark=astropy.nddata.CCDData.read(masterdarkfile)
             dedark0=ccdproc.subtract_dark(debiased0,master_dark,exposure_time='exptime',exposure_unit=u.second,scale=True,add_keyword={'dark_corr':'Done'})
         else:
             dedark0 = debiased0
@@ -266,18 +326,57 @@ def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes,
 #                master_bias_gain_corrected=ccdproc.gain_correct(master_bias,master_bias.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
 
         gain_corrected2=deepcopy(gain_corrected)
-        exptime_ratio=np.float(data.header['exptime'])/np.float(master_dark.meta['exptime'])
-
+        if corrdark:
+            exptime_ratio=np.float(data.header['exptime'])/np.float(master_dark.meta['exptime'])
+        else:
+            exptime_ratio=0.
         ntot = len(gain_corrected2.data)
-        for k in range(0,len(gain_corrected2.data)):
-            for q in range(0,len(gain_corrected2.data[k])):
-                gain_corrected2.uncertainty.quantity.value[k][q]=(np.max(np.array([gain_corrected2.data[k][q]+master_dark.data[k][q]*gain*exptime_ratio+2.+obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2,0.6*(obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
-#                        poop1=(np.max(np.array([gain_corrected2.data[k][q]+master_dark.data[k][q]*gain*exptime_ratio+2.+obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2,0.6*(obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
-#                        poop2=(np.max(np.array([gain_corrected2.data[k][q]+2.+obs_readnoise**2,0.6*(obs_readnoise**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
-#                        print(poop1/poop2)
-#                cr_cleaned=ccdproc.cosmicray_lacosmic(gain_corrected,sigclip=10)
-            print("Uncertainty computation {:0.0f}%".format(k/ntot*100), end='\r')
-        print("Uncertainty computation {:0.0f}%".format(k/ntot*100))
+        # from IPython import embed
+        # embed()
+
+        _data = np.array(np.copy(gain_corrected2.data), dtype=float)
+        _uncertainty = np.array(np.copy(gain_corrected2.uncertainty.quantity.value), dtype=float)
+        _datadark = np.array(np.copy(master_dark.data), dtype=float)
+        _uncertaintydark = np.array(np.copy(master_dark.uncertainty.quantity.value), dtype=float)
+        _uncertaintybias = np.array(np.copy(master_bias.uncertainty.quantity.value), dtype=float)
+        uncertainty = compute_flux_tile_fast(_data, _uncertainty,
+                               _datadark, _uncertaintydark, 
+                               _uncertaintybias,
+                               corrdark, gain, exptime_ratio, obs_readnoise, ntot)
+        gain_corrected2.uncertainty = uncertainty
+#         for k in range(0,len(gain_corrected2.data)):
+#             for q in range(0,len(gain_corrected2.data[k])):
+#                 if corrdark:
+#                     gain_corrected2.uncertainty.quantity.value[k][q]=(
+#                         np.max(np.array([gain_corrected2.data[k][q]
+#                                         +master_dark.data[k][q]*gain*exptime_ratio
+#                                         +2.
+#                                         +obs_readnoise**2
+#                                         +(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2
+#                                         +(master_bias.uncertainty.quantity.value[k][q]*gain)**2,
+#                                         0.6*(obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2
+#                                             +(master_bias.uncertainty.quantity.value[k][q]*gain)**2)
+#                                         ])
+#                                 ))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+# #                        poop1=(np.max(np.array([gain_corrected2.data[k][q]+master_dark.data[k][q]*gain*exptime_ratio+2.+obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2,0.6*(obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+# #                        poop2=(np.max(np.array([gain_corrected2.data[k][q]+2.+obs_readnoise**2,0.6*(obs_readnoise**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+# #                        print(poop1/poop2)
+#                 else:
+#                     gain_corrected2.uncertainty.quantity.value[k][q]=(
+#                         np.max(np.array([gain_corrected2.data[k][q]
+#                                         # +master_dark.data[k][q]*gain*exptime_ratio
+#                                         +2.
+#                                         +obs_readnoise**2
+#                                         # +(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2
+#                                         +(master_bias.uncertainty.quantity.value[k][q]*gain)**2,
+#                                         0.6*(obs_readnoise**2
+#                                             #  +(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2
+#                                              +(master_bias.uncertainty.quantity.value[k][q]*gain)**2)
+#                                         ])
+#                                 ))**0.5
+# #                cr_cleaned=ccdproc.cosmicray_lacosmic(gain_corrected,sigclip=10)
+#             print("Uncertainty computation {:0.0f}%".format(k/ntot*100), end='\r')
+#         print("Uncertainty computation {:0.0f}%".format(k/ntot*100))
 #                bad=np.where(gain_corrected.data<0.)
 #                bad=np.where(gain_corrected._uncertainty.quantity.value!=gain_corrected._uncertainty.quantity.value)#bad variances due to negative counts after overscan/bias/dark correction
 #                gain_corrected.uncertainty.quantity.value[bad]=obs_readnoise
@@ -419,7 +518,11 @@ def get_thar(filedict, ccd, id_list, lco, use_flat, exptime, id_lines_array_file
             # id_lines_array_file = tmppath + "{}{:04d}-id-lines-array-noflat.pickle".format(ccd, file_id)
         id_lines_array=pickle.load(open(id_lines_array_file,'rb'))
         data=astropy.nddata.CCDData.read(data_file)#format is such that data.data[:,0] has column-0 value in all rows
-        time0=[data.header['DATE-OBS']+'T'+data.header['UT-TIME'],data.header['DATE-OBS']+'T'+data.header['UT-END']]
+        ## Sometimes the DATE-OBS key card contains the T and the UT-TIME... So here is a fix:
+        if 'T' in data.header['DATE-OBS']:
+            time0=[data.header['DATE-OBS'],data.header['DATE-OBS'].replace(data.header['UT-TIME'], data.header['UT-END'])]
+        else:
+            time0=[data.header['DATE-OBS']+'T'+data.header['UT-TIME'],data.header['DATE-OBS']+'T'+data.header['UT-END']]
         times=time.Time(time0,location=lco,precision=6)
         filtername=data.header['FILTER']
         ## PIC: Bypassing the following
@@ -484,7 +587,7 @@ def get_linelist(linelist_file, species_name='default-name'):
     linelist_species=np.array(linelist_species)
     return m2fs.linelist(wavelength=linelist_wavelength,species=linelist_species)
 
-import m2fs_process as m2fs
+from . import m2fs_process as m2fs
 
 ### TODELETE DEFINITION REPEATED
 # def get_id_lines_template(extract1d,linelist,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order,threshold_factor,window,id_lines_order,id_lines_rejection_iterations,id_lines_rejection_sigma,id_lines_tol_angs,id_lines_template_fiddle,id_lines_template0,resolution_order,resolution_rejection_iterations):
@@ -548,7 +651,7 @@ import m2fs_process as m2fs
 
 def on_key_id_lines(event,args_list):
     import numpy as np
-    import m2fs_process as m2fs
+    from . import m2fs_process as m2fs
     from specutils import SpectralRegion
     import astropy.units as u
     from astropy.modeling import models
@@ -676,13 +779,15 @@ def on_key_id_lines(event,args_list):
     fig.canvas.draw_idle()
     return
 
-def fiddle_apertures(columnspec_array,column,window,apertures,find_apertures_file):
+def fiddle_apertures(columnspec_array,columnarr,window,apertures,find_apertures_file):
     import matplotlib
     import matplotlib.pyplot as plt
     import numpy as np
     from specutils import SpectralRegion
     import astropy.units as u
     from astropy.modeling import models
+
+    column = columnarr[0]
 
     subregion,fit,realvirtual,initial=apertures.subregion,apertures.fit,apertures.realvirtual,apertures.initial
     subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,apertures.initial)
@@ -721,29 +826,49 @@ def fiddle_apertures(columnspec_array,column,window,apertures,find_apertures_fil
     print('press \'q\' to quit \n')
     fig.canvas.mpl_disconnect(fig.canvas.manager.key_press_handler_id) # PIC This disable any key that was not set up.
     cid=fig.canvas.mpl_connect('key_press_event',lambda event: on_key_find(event,[columnspec_array,
-                                                                                  column,subregion,
+                                                                                  columnarr,subregion,
                                                                                   fit,realvirtual,
                                                                                   initial,window,fig]))
     plt.show()
-    print('This is the column I get: {}'.format(column))
+    # print('This is the column I get: {}'.format(column))
 #    plt.savefig(find_apertures_file,dpi=200)
     subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
     return m2fs.aperture_profile(fit,subregion,realvirtual,initial)
 
 def on_key_find(event,args_list):
     import numpy as np
-    import m2fs_process as m2fs
+    from . import m2fs_process as m2fs
     from specutils import SpectralRegion
     import astropy.units as u
     from astropy.modeling import models
     from specutils.spectra import Spectrum1D
 
     print('you pressed ', event.key)
+    keyoptions = ['z', 'd', 'e', 'n', 'a', 'q', 'r', 'g', 'h', ' H', 'j', 'p', 'c', 'k', 'K']
 
-    keyoptions = ['z', 'd', 'e', 'n', 'a', 'q', 'r', 'g', 'h', 'j', 'p', 'c', 'k', 'K']
+    global columnspec_array,columnarr,subregion,fit,realvirtual,initial,window
+    columnspec_array,columnarr,subregion,fit,realvirtual,initial,window,fig=args_list
 
-    global columnspec_array,column,subregion,fit,realvirtual,initial,window
-    columnspec_array,column,subregion,fit,realvirtual,initial,window,fig=args_list
+    # from IPython import embed
+    # embed()
+
+    ## Sort the apertures
+    means = [fit[i].mean.value for i in range(len(fit))] ## means of the gaussian fits
+    _idx_sort = np.argsort(means) ## sorted positions
+
+    fit_sorted = [fit[i] for i in _idx_sort]
+    subregion_sorted = [subregion[i] for i in _idx_sort]
+    realvirtual_sorted = [realvirtual[i] for i in _idx_sort]
+    initial_sorted = [initial[i] for i in _idx_sort]
+
+    for i in range(len(fit)):
+        fit[i] = fit_sorted[i]
+        subregion[i] = subregion_sorted[i]
+        realvirtual[i] = realvirtual_sorted[i]
+        initial[i] = initial_sorted[i]
+
+    column = columnarr[0]
+    print('looking at column: {}'.format(column))
 
     if event.key in keyoptions:
         if event.key=='r':
@@ -872,7 +997,51 @@ def on_key_find(event,args_list):
                     # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
             print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100))
             subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
-
+        if event.key=='H':
+            ## Same as h but I keep the current position of the identified appertures
+            initpos = [fit[i].mean.value for i in range(len(fit))]
+            ## PIC: First delete everything:
+            aperture_centers=[fit[q].mean for q in range(0,len(fit))]
+            print('deleting all apertures ')
+            for q in range(0,len(subregion)):
+                del(subregion[len(subregion)-1])
+            for q in range(0,len(fit)):
+                del(fit[len(fit)-1])
+            for q in range(0,len(realvirtual)):
+                del(realvirtual[len(realvirtual)-1])
+            for q in range(0,len(initial)):
+                del(initial[len(initial)-1])
+            ## PIC: Iterate through everything:
+            specarray = columnspec_array[column].spec ## That's the think we plot
+            # idx, _ = peak_finder(specarray)
+            idx = initpos
+            ntot = len(idx)
+            for ieventxdata, eventxdata in enumerate(idx):
+                print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
+                if (ieventxdata%2)==0:
+                    new_center=np.float(eventxdata)
+                    x_center=new_center
+                    spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
+                    subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
+                    subregion.append(subregion0)
+                    fit.append(fit0)
+                    realvirtual.append(True)
+                    initial.append(False)
+                    # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
+                else:
+                    new_center=np.float(eventxdata)
+                    x_center=new_center
+                    val1=x_center-window/2.
+                    val2=x_center+window/2.
+                    subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
+                    aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+                    halfwindow=window/2.
+                    fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
+                    realvirtual.append(False)
+                    initial.append(False)
+                    # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
+            print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100))
+            subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial) 
         if event.key=='j':
             ## PIC: First delete everything:
             aperture_centers=[fit[q].mean for q in range(0,len(fit))]
@@ -984,6 +1153,7 @@ def on_key_find(event,args_list):
                 csa = int(float(csa))
             else:
                 csa = 1
+            initpos = [fit[i].mean.value for i in range(len(fit))]
             ## PIC: First delete everything:
             aperture_centers=[fit[q].mean for q in range(0,len(fit))]
             mycenters = np.array([int(fit[q].mean.value) for q in range(0,len(fit))]) 
@@ -999,15 +1169,16 @@ def on_key_find(event,args_list):
             # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
             ## PIC: Iterate through everything:
             specarray = columnspec_array[column].spec ## That's the think we plot
-            idx, _ = peak_finder(specarray, ths=0, med=0)
-            ## Take the closest to those initially found
-            mynewidx = np.copy(idx)
-            for ii in range(len(mycenters)):
-                res = (mycenters[ii]-idx)**2
-                position = np.where(res==np.min(res))[0][0]
-                mynewidx[ii] = idx[position]
-            idx = np.copy(mynewidx)
-            idx = np.copy(mycenters)
+            # idx, _ = peak_finder(specarray, ths=0, med=0)
+            idx = initpos
+            # ## Take the closest to those initially found
+            # mynewidx = np.copy(idx)
+            # for ii in range(len(mycenters)):
+            #     res = (mycenters[ii]-idx)**2
+            #     position = np.where(res==np.min(res))[0][0]
+            #     mynewidx[ii] = idx[position]
+            # idx = np.copy(mynewidx)
+            # idx = np.copy(mycenters)
             ntot = len(idx)
             allowed_apertures = []
             for iii in range(150):
@@ -1101,16 +1272,20 @@ def on_key_find(event,args_list):
 
         if event.key=='c':
             ## Update the column number
-            newcolumn = input("Column nb: ")
+            newcolumn = input("Column nb [current:{}/{}]: ".format(column, len(columnspec_array)))
             diff = column - int(float(newcolumn))
-            column -= diff
+            # from IPython import embed
+            # embed()
+            column = column - diff
+            columnarr[0] = column
 
         if event.key=='q':
             plt.close(event.canvas.figure)
             # return
-
+    
     x=np.arange(0,len(columnspec_array[column].spec))
-    ax1=fig.add_subplot(111)
+    # ax1=fig.add_subplot(111)
+    ax1 = fig.axes[0]
     ax1.cla()
     ax1.plot(columnspec_array[column].pixel,columnspec_array[column].spec,lw=0.3,color='k')
     # specarray = columnspec_array[column].spec ## That's the thing we plot
@@ -1199,7 +1374,8 @@ def peak_finder(y, ths=1/20, med=1):
     # f = interp1d(x, ny, kind='quadratic')
     # nx = np.linspace(0, len(ny)-1, 100*len(ny))
     # ny = f(nx)
-    nx, ny = xresample(x, ny, 100)
+    # nx, ny = xresample(x, ny, 5)
+    nx, ny = x, ny
 
     ## Implement a threshold for the detection
     ny[ny<np.max(ny)*ths] = 0
@@ -1317,7 +1493,7 @@ def get_id_lines_template(extract1d,linelist,continuum_rejection_low,continuum_r
 
 def on_key_id_lines(event,args_list):
     import numpy as np
-    import m2fs_process as m2fs
+    from . import m2fs_process as m2fs
     from specutils import SpectralRegion
     import astropy.units as u
     from astropy.modeling import models
@@ -1327,7 +1503,7 @@ def on_key_id_lines(event,args_list):
 
     #print('you pressed ',event.key)
 
-    keyoptions = ['.', 'm', 'd', 'o', 'r', 't', 'z', 'g', 'l', 'q']
+    keyoptions = ['.', 'm', 'd', 'o', 'r', 't', 'z', 'g', 'l', 'q', 'p']
 
     global id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints
     extract1d,continuum,fit_lines,linelist,line_centers,id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints,id_lines_tol_angs,fig=args_list
@@ -1434,6 +1610,16 @@ def on_key_id_lines(event,args_list):
             rms.append(rms0)
             npoints.append(npoints0)
 
+        # if event.key=='p':
+        #     # from IPython import embed
+        #     # embed()
+        #     print('plotting the residuals and the fit')
+        #     fig2, axtmp = plt.subplots(1,1)
+        #     plt.figure()
+        #     plt.plot(id_lines_pix, id_lines_wav)
+        #     plt.plot(id_lines_pix, func[0](id_lines_pix))
+        #     plt.show()
+        
         if event.key=='l':
             func0,rms0,npoints0,y=m2fs.id_lines_fit(deepcopy(id_lines_pix),deepcopy(id_lines_wav),deepcopy(id_lines_used),order,rejection_iterations,rejection_sigma)
             new_pix,new_wav,new_used=m2fs.line_id_add_lines(deepcopy(linelist),deepcopy(line_centers),deepcopy(id_lines_used),deepcopy(func0),id_lines_tol_angs)
@@ -2135,7 +2321,7 @@ def interpolate_numba(x, x1, y1):
                     break
     return result
 #
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def get_interp_numba(q, x0, y0, pixel0_template, pixelscale_template, xref):
         xscale=(x0-pixel0_template)/pixelscale_template
         # x1=q[1]*pixelscale_template+x0*(1.+np.polynomial.polynomial.polyval(xscale,q[2:]))
@@ -2147,19 +2333,19 @@ def get_interp_numba(q, x0, y0, pixel0_template, pixelscale_template, xref):
         # interp=q[0]*interpolate_numba(xref,x1,y0)
         return interp
 #
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def my_func_numba(q, x0, y0, pixel0_template, pixelscale_template, xref, fluxref):
     '''Function computing the residuals between the new spectrum and the template'''
     interp=get_interp_numba(q, x0, y0, pixel0_template, pixelscale_template, xref)
     diff2=(fluxref-interp)**2
     return np.sum(diff2)
 #
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def loglike_numba(q, x0, y0, pixel0_template, pixelscale_template, xref, fluxref):
     '''Log likelihood for fit'''
     return -0.5*my_func_numba(q, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
 #
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def guess_params_numba_descent(q0, q1, x0, y0, pixel0_template, pixelscale_template, xref, fluxref):
     # q0 = np.arange(0., 5., 0.01)
     # q1 = np.arange(-0.1, 0.1, 0.001)
@@ -2175,7 +2361,7 @@ def guess_params_numba_descent(q0, q1, x0, y0, pixel0_template, pixelscale_templ
             i+=1
     return q0out, q1out
 #
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def guess_params_numba_descent_3d(q0, q1, q2, x0, y0, pixel0_template, pixelscale_template, xref, fluxref):
     # q0 = np.arange(0., 5., 0.01)
     # q1 = np.arange(-0.1, 0.1, 0.001)
@@ -2215,20 +2401,36 @@ def guess_params_numba(x0, y0, pixel0_template, pixelscale_template, xref, fluxr
 
 def guess_params_numba_3d(x0, y0, pixel0_template, pixelscale_template, xref, fluxref):
     ## Initial grid
-    q0 = np.arange(0., 5., .5)
-    q1 = np.arange(-0.1, 0.1, 0.05)
-    q2 = np.arange(-0.1, 0.125, 0.025)
+    q0 = np.arange(0., 3., .2)
+    q0 = np.array([np.nanmedian(fluxref)/np.nanmedian(y0)])
+    q1 = np.arange(-0.2, 0.2, 0.025)
+    q2 = np.arange(-0.3, 0.325, 0.005)
+    q2 = np.array([0.])
     _q0, _q1, _q2 = guess_params_numba_descent_3d(q0, q1, q2, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+    print(_q0, _q1, _q2)
     ## new grid placing this in the center
-    q0 = np.arange(_q0-1.5, _q0+2, 0.025)
-    q1 = np.arange(_q1-0.15, _q1+0.2, 0.0025)
-    q2 = np.arange(_q2-0.06, _q2+0.08, 0.02)
+    q0 = np.arange(0.5, 1.5, 0.05)
+    q1 = np.arange(_q1-0.35, _q1+0.4, 0.005)
+    q2 = np.arange(_q2-0.01, _q2+0.011, 0.001)
     _q0, _q1, _q2 = guess_params_numba_descent_3d(q0, q1, q2, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
-    ## new grid placing this in the center
-    q0 = np.arange(_q0-0.05, _q0+0.1, 0.0125)
-    q1 = np.arange(_q1-0.005, _q1+0.005, 0.00125)
-    q2 = np.arange(_q2-0.07, _q2+0.08, 0.01)
-    _q0, _q1, _q2 = guess_params_numba_descent_3d(q0, q1, q2, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+    print(_q0, _q1, _q2)
+    # ## new grid placing this in the center
+    # q0 = np.arange(_q0-1.5, _q0+2, 0.025)
+    # q1 = np.arange(_q1-0.1, _q1+0.11, 0.001)
+    # q2 = np.arange(_q2-0.02, _q2+0.04, 0.01)
+    # _q0, _q1, _q2 = guess_params_numba_descent_3d(q0, q1, q2, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+    # print(_q0, _q1, _q2)
+    # ## new grid placing this in the center
+    # q0 = np.arange(_q0-1.5, _q0+2, 0.025)
+    # q1 = np.arange(_q1-0.1, _q1+0.11, 0.001)
+    # q2 = np.arange(_q2-0.04, _q2+0.06, 0.01)
+    # _q0, _q1, _q2 = guess_params_numba_descent_3d(q0, q1, q2, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
+    # print(_q0, _q1, _q2)
+    # ## new grid placing this in the center
+    # q0 = np.arange(_q0-0.05, _q0+0.1, 0.0125)
+    # q1 = np.arange(_q1-0.005, _q1+0.005, 0.00125)
+    # q2 = np.arange(_q2-0.07, _q2+0.08, 0.01)
+    # _q0, _q1, _q2 = guess_params_numba_descent_3d(q0, q1, q2, x0, y0, pixel0_template, pixelscale_template, xref, fluxref)
     # ## new grid placing this in the center
     # q0 = np.arange(_q0-0.025, _q0+0.1, 0.0062)
     # q1 = np.arange(_q1-0.0025, _q1+0.005, 0.00062)
@@ -2241,7 +2443,7 @@ def mynumbapoly(x, c):
     nbcoeffs = len(c)
     y = np.zeros(x.shape)
     for i in range(nbcoeffs):
-        y+=c[i]*x**i
+        y+=c[i]*(x**i)
     return y
 
 def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,linelist,continuum_rejection_low,
@@ -2434,6 +2636,7 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
             # ### ---------------
             # # PIC: Now we debug: let's look at the spectra and how the previous method estimates the
             # # stretch and flux.
+            # myparams = np.copy(params)
             # interp=get_interp(params)#,spec_contsub,spec_contsub_template,use,use_template,pixel0_template,pixelscale_template)
             # plt.figure()
             # plt.plot(spec_contsub_template_flux_value[use_template])
@@ -2518,7 +2721,7 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
 
                 resolution,resolution_rms,resolution_npoints=m2fs.get_resolution(deepcopy(fit_lines),deepcopy(wav),resolution_order,resolution_rejection_iterations)
                 print('mark 5 {}'.format(time.time()))
-        # if extract1d.aperture == 99:
+        # if extract1d.aperture == 44:
         #     from IPython import embed
         #     embed()
         #     plt.figure()
@@ -2617,7 +2820,12 @@ def fit_aperture(spec,window,x_center):
 #    print(spectrum)
 
     g_init=models.Gaussian1D(amplitude=rough.amplitude.value*u.electron,mean=rough.mean.value*u.AA,stddev=rough.stddev.value*u.AA)#now do a fit using rough estimate as first guess
-    g_fit0=fit_lines(sub_spectrum,g_init)#now do a fit using rough estimate as first guess
+    try:
+        g_fit0=fit_lines(sub_spectrum,g_init)#now do a fit using rough estimate as first guess
+    except:
+        g_fit0=g_init ## PIC: for now, if the fit is impossible I don't let the program crash.
+        # from IPython import embed
+        # embed()
     # g_fit2=myfit_lines(sub_spectrum,g_init)#now do a fit using rough estimate as first guess
     
     ## PIC: The following was just to make a plot and test a different fitting function
@@ -3251,7 +3459,7 @@ def gen_plugmap_from_file(filename, ccd):
     return plugmapdic #ids, headers, objtype
 
 def order_halphali(plugmapdic, cassettes_order):
-    '''Function to orde the Halpha-Li filter.
+    '''Function to order the Halpha-Li filter.
     The order has two consecutive orders.
     In this mode, I assume that only impair '''
 
@@ -3343,6 +3551,71 @@ def order_dupreeblue(plugmapdic, cassettes_order):
 
     return apertures, identifiers, objtypes, fibers
 
+
+def order_hkhires(plugmapdic, cassettes_order):
+    '''Function to order the dupreeblue filter.
+    The order has 4 NON-consecutive orders (in practive more, things are messed up,
+    but we can used one side of the image to try to count 144.
+    NOTE THAT I ACTUALLY CONSIDER 3 ORDERS HERE'''
+
+    objtypes = []
+    apertures = []
+    identifiers = []
+    fibers = []
+
+    ## First pass: what are the valid fibers percassettes?
+    validfibers = {}
+    for cassette in cassettes_order:
+        _valids = []
+        for fibernb in range(16, 0, -1): ## from top to botton, for both ccd is the same
+            if 'unused' not in plugmapdic[cassette][fibernb]['objtype']: 
+                _valids.append(fibernb)
+        validfibers[cassette] = _valids.copy()
+
+    aperture=1 ## We're gonna count the apertures
+    for cassette in cassettes_order:
+        fiber_numbers = validfibers[cassette]
+        for iter in range(0, len(fiber_numbers), 2): ## from top to botton, for both ccd is the same
+            fibernb = fiber_numbers[iter]
+            if 'unused' in plugmapdic[cassette][fibernb]['objtype']: 
+                print("FIBER{}{:02d}".format(cassette, fibernb))
+                continue
+            if 'unused' in plugmapdic[cassette][fibernb]['objtype']: 
+                print("FIBER{}{:02d}".format(cassette, fiber_numbers[iter+1]))
+                continue
+            for order in range(3,0,-1):
+                # first fiber
+                apertures.append(aperture)
+                objtypes.append(plugmapdic[cassette][fibernb]['objtype'])
+                identifiers.append(plugmapdic[cassette][fibernb]['identifier'])
+                fibers.append('FIBER{}{:02d}'.format(cassette, fibernb))
+                aperture+=1
+                # second fiber
+                apertures.append(aperture)
+                objtypes.append(plugmapdic[cassette][fiber_numbers[iter+1]]['objtype'])
+                identifiers.append(plugmapdic[cassette][fiber_numbers[iter+1]]['identifier'])
+                fibers.append('FIBER{}{:02d}'.format(cassette, fiber_numbers[iter+1]))
+                aperture+=1
+
+    ## We may be having less than 128 apertures, and yet, our program currently needs 128
+    ## For now I "complete" the missing apertures to reach 128. In the future we could
+    ## Try to do things in a more clever way?
+    ## I am still confused by this 128 number - I can't quite understand if that's an absolute
+    ## maximum, since I see many more with the blue filter. And with Novembder Halpha-Li data
+    ## We have only 120 plugged fibers, but still 128 traces...
+
+    # from IPython import embed
+    # embed()
+    ## This also simply cannot work properly.
+    # while len(fibers)<128: 
+    #     apertures.append(aperture)
+    #     objtypes.append('UNUSED')
+    #     identifiers.append('')
+    #     fibers.append('FIBER{}{:02d}'.format(cassette, fibernb))
+    #     aperture+=1
+
+    return apertures, identifiers, objtypes, fibers
+
 def order_fibers(plugmapdic, ccd, filter):
     '''Function to order the fiber based on filter and CCD'''
     
@@ -3350,13 +3623,16 @@ def order_fibers(plugmapdic, ccd, filter):
         cassettes_order = np.arange(8, 0, -1) ## From top to bottom of image
     elif 'b' in ccd: ## Red ccd
         cassettes_order = np.arange(1, 9, 1) ## From top to bottom of image
-    
     if 'halphali' in filter:
         apertures, identifiers, objtypes, fibers = order_halphali(plugmapdic, cassettes_order)
     elif 'dupreeblue' in filter:
         apertures, identifiers, objtypes, fibers = order_dupreeblue(plugmapdic, cassettes_order)
+    elif 'hkhires' in filter:
+        apertures, identifiers, objtypes, fibers = order_hkhires(plugmapdic, cassettes_order)
+    elif 'nadhiro60' in filter: ## I assume that the layout is the same for na filter
+        apertures, identifiers, objtypes, fibers = order_hkhires(plugmapdic, cassettes_order)
     else:
-        raise Exception('function_dump.order_fibers: unknown filter, try options: {} | {}'.format('halphali', 'dupreeblue'))
+        raise Exception('function_dump.order_fibers: unknown filter {}, try options: {}, {}'.format(filter, 'halphali', 'dupreeblue', 'hkhires'))
     return apertures, identifiers, objtypes, fibers
 
 
@@ -3510,11 +3786,18 @@ def extract_aperture(pix, _data, _mask, _uncertainty, ymids, profile_sigmas, win
                     int2=0.5*(numbaerf(ymid/profile_sigma/np.sqrt(2.))-numbaerf((ymid-(y1-0.5+k+1))/profile_sigma/np.sqrt(2.)))
                     weight=int2-int1
 #                    sum1=sum1.add((sss[k].multiply(weight)).divide(uncertainty.quantity.value[k]**2))
+                    if uncertainty[k]==0.:
+                        print('extract_aperture: 0 value in uncertainty')
                     sum1+=data[k]*weight/uncertainty[k]**2
                     sum2+=weight**2/uncertainty[k]**2
 #            val=sum1.divide(sum2)
-            val=sum1/sum2
-            err=1./np.sqrt(sum2)
+            if sum2==0.:
+                # print('extract_aperture: 0 value in sum2')
+                val=0.
+                err=999.
+            else:
+                val=sum1/sum2
+                err=1./np.sqrt(sum2)
             myspec[x] = val
             myerr[x] = err
             if ((val==val)&(err>0.)&(err==err)):
@@ -3530,3 +3813,316 @@ def extract_aperture(pix, _data, _mask, _uncertainty, ymids, profile_sigmas, win
             myerr[x] = 999.
     
     return myspec, myerr, mymask        
+
+# @jit(nopython=True)
+def extract_aperture2(pix, _data, _mask, _uncertainty, ymids, profile_sigmas, wings):
+    '''PIC: I'm just trying to not use the formula that I don't understand'''
+    myspec = np.ones(len(pix))
+    myspec2 = np.ones(len(pix))
+    myweight2 = np.ones(len(pix))
+    myerr = np.ones(len(pix))    
+    mymask = np.ones(len(pix))*True
+    for x in pix:
+#        wing=3.
+        ymid = ymids[x]
+        profile_sigma = profile_sigmas[x]
+        wing = wings[x]
+        ymid = ymids[x]
+        y1=np.long(ymid-wing)
+        y2=np.long(ymid+wing)
+        data=_data[y1:y2+1,x]
+        mask=_mask[y1:y2+1,x]
+        uncertainty = _uncertainty[y1:y2+1,x]
+        if x==1000:
+            plt.figure()
+            plt.plot(_data[:,x])
+            plt.plot(np.arange(y1, y2+1), _data[y1:y2+1,x])
+            plt.show()
+        if ((wing>0.)&(len(np.where(mask==0)[0])>=1)):
+#            sum1=CCDData([0.],unit=data.unit,mask=[False])
+            sum1=0.
+            sum2=0.
+            mysum=0.
+            mysubweights = np.zeros(len(data))
+            for k in range(0,len(data)):
+                # if mask[k]==False:
+                if True is True:
+                    int1=0.5*(numbaerf(ymid/profile_sigma/np.sqrt(2.))-numbaerf((ymid-(y1-0.5+k))/profile_sigma/np.sqrt(2.)))
+                    int2=0.5*(numbaerf(ymid/profile_sigma/np.sqrt(2.))-numbaerf((ymid-(y1-0.5+k+1))/profile_sigma/np.sqrt(2.)))
+                    weight=int2-int1
+#                    sum1=sum1.add((sss[k].multiply(weight)).divide(uncertainty.quantity.value[k]**2))
+                    sum1+=data[k]*weight/uncertainty[k]**2
+                    sum2+=weight**2/(uncertainty[k]/2)**2
+                    mysum+=data[k]*weight
+                    mysubweights[k]+=weight
+#            val=sum1.divide(sum2)
+            val=sum1/sum2
+            err=1./np.sqrt(sum2)
+            myspec[x] = val
+            myerr[x] = err
+            myspec2[x] = mysum
+            myweight2[x] = weight
+            if ((val==val)&(err>0.)&(err==err)):
+                mymask[x] = False
+            else:
+                mymask[x] = True
+#            spec.append(sss.data[0])
+#            spec_error.append(sss.uncertainty.quantity.value[0])
+#            spec_mask.append(False)            
+        else:
+            myspec[x] = 0.
+            mymask[x] = True
+            myerr[x] = 999.
+        # if x==1000:
+        #     print(ymid)
+        #     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        #     ax1.plot(data)
+        #     ax1.plot(mysubweights)
+        #     ax2.plot(data - mysubweights)
+        #     plt.show()
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    ax1.plot(myspec)
+    fac = 1
+    ax1.plot(myspec2*fac)
+    ax2.plot(myspec - myspec2*fac)
+    plt.show()
+    return myspec, myerr, mymask        
+
+def get_scatteredlightfunc(data,apmask,scatteredlightcorr_order,scatteredlightcorr_rejection_iterations,scatteredlightcorr_rejection_sigma):
+    '''The original function had very little chance to give something accurate if we did not use all of the
+    apertures at once. This is because it tries to mask the apertures and then dertermine the scattered light
+    on what is left. This will not work. What we can try is having a second mask to remove ALL the apertures
+    independently from what we estimated.
+    Then the function fits a 2D polynomial on the surface at once. That appears to be little different from
+    what IRAF does...'''
+    
+    
+    import numpy as np
+    import astropy.units as u
+    from astropy.modeling import models
+    from specutils.spectra import Spectrum1D
+    from astropy.modeling import models,fitting
+    import matplotlib.pyplot as plt
+
+    # from IPython import embed
+    # embed()
+
+    # mymask = np.copy(apmask)
+    # mymask = ~mymask
+    # plt.figure()
+    # plt.imshow(data*(~mymask), vmax=100)
+    # plt.show()
+
+
+    # plt.figure()
+    # plt.plot(data.data[1000])
+    # plt.plot(scattered_model.data[1000])
+    # plt.show()
+
+    func_init=models.Polynomial2D(degree=scatteredlightcorr_order)
+    fitter=fitting.LinearLSQFitter()
+    y,x=np.mgrid[:len(data.data),:len(data.data[0])]
+
+    for q in range(0,scatteredlightcorr_rejection_iterations):
+        use=np.where(apmask==False)[0]
+        func=fitter(func_init,x[apmask==False],y[apmask==False],data.data[apmask==False])
+        rms=np.sqrt(np.mean((data.data[apmask==False]-func(x[apmask==False],y[apmask==False]))**2))
+        outlier=np.where(np.abs(data.data-func(x,y))>scatteredlightcorr_rejection_sigma*rms)
+#        outlier=np.where(data.data-func(x,y)>scatteredlightcorr_rejection_sigma*rms)
+        apmask[outlier]=True
+    return m2fs.scatteredlightfunc(func=func,rms=rms)
+
+def get_apmask2(data,aperture_array,apertures_profile_middle,aperture_peak,image_boundary):
+    import numpy as np
+    from astropy.nddata import CCDData
+    from specutils.spectra import Spectrum1D
+    import astropy.units as u
+    from astropy.nddata import StdDevUncertainty
+
+    apmask0=np.array(data.mask,dtype=bool)
+    pix=np.arange(len(apmask0[0]))
+
+    apmask=m2fs.mask_boundary(apmask0,image_boundary)
+
+    for j in range(0,len(aperture_array)):
+        # if apertures_profile_middle.realvirtual[j]:
+            above0,below0=m2fs.get_above_below(j,data,aperture_array,apertures_profile_middle,aperture_peak)
+            for x in pix:
+#                if ((x>=aperture_array[j].trace_pixel_min)&(x<=aperture_array[j].trace_pixel_max)):
+                ymid=aperture_array[j].trace_func(x)
+                if apertures_profile_middle.realvirtual[j]:
+                    profile_sigma=aperture_array[j].profile_sigma(x)
+                else:
+                    profile_sigma = 2 ## Default value
+                wing=np.min([3.*profile_sigma,(above0-below0)/2./2.])
+                if wing>0.:
+                    y1=np.long(ymid-wing)
+                    y2=np.long(ymid+wing)
+                    apmask[y1:y2,x]=True
+                    if ((x<aperture_array[j].trace_pixel_min)|(x>aperture_array[j].trace_pixel_max)):
+                        apmask[y1:y2,x]=True
+                    if ((ymid<0.)|(ymid>len(data.data))):
+                        apmask[y1:y2,x]=True
+    return apmask
+
+# @jit(nopython=True)
+def trace_apmask_aperture_fast(apmask, apmask2, pix, trace_vals, realaperture, profile_sigmas, 
+                               above0, below0, aperture_array_trace_pixel_min, aperture_array_trace_pixel_max, data):
+    for ix, x in enumerate(pix):
+        ymid = trace_vals[ix]
+        if realaperture:
+            profile_sigma=profile_sigmas[ix]
+        else:
+            profile_sigma = 2. # 2 ## Default value
+        # if (3.*profile_sigma > (above0-below0)/3.):
+        #     print("choosing wings size:")
+        #     print(3.*profile_sigma,(above0-below0)/3.)
+        # wing=np.min(np.array([3.*profile_sigma,(above0-below0)/3.]))
+        if (3.*profile_sigma)>((above0-below0)/3.):
+            wing = (above0-below0)/3.
+        else: wing = 3.*profile_sigma
+
+        if wing>0.:
+            y1=np.long(ymid-wing)
+            y2=np.long(ymid+wing)
+            if realaperture:
+                apmask[y1:y2,x]=True
+                if ((x<aperture_array_trace_pixel_min)|(x>aperture_array_trace_pixel_max)):
+                    apmask[y1:y2,x]=True
+                if ((ymid<0.)|(ymid>len(data))):
+                    apmask[y1:y2,x]=True
+            ## Whether it is real or not, we populate the apmask2
+            apmask2[y1:y2,x]=True
+            if ((x<aperture_array_trace_pixel_min)|(x>aperture_array_trace_pixel_max)):
+                apmask2[y1:y2,x]=True
+            if ((ymid<0.)|(ymid>len(data))):
+                apmask2[y1:y2,x]=True
+    return apmask, apmask2
+def get_apmask(data,aperture_array,apertures_profile_middle,aperture_peak,image_boundary):
+    import numpy as np
+    from astropy.nddata import CCDData
+    from specutils.spectra import Spectrum1D
+    import astropy.units as u
+    from astropy.nddata import StdDevUncertainty
+
+    apmask0=np.array(data.mask,dtype=bool)
+    pix=np.arange(len(apmask0[0]))
+
+    apmask=m2fs.mask_boundary(apmask0,image_boundary)
+    apmask2=m2fs.mask_boundary(apmask0,image_boundary)
+
+    for j in range(0,len(aperture_array)):
+        # if apertures_profile_middle.realvirtual[j]:
+        above0,below0=m2fs.get_above_below(j,data,aperture_array,apertures_profile_middle,aperture_peak)
+        ## Let's go faster with numba
+        realaperture = np.array(apertures_profile_middle.realvirtual[j], dtype=float)
+        trace_vals = np.array(aperture_array[j].trace_func(pix), dtype=float)
+        if realaperture:
+            profile_sigmas = np.array(aperture_array[j].profile_sigma(pix), dtype=float)
+        else:
+            profile_sigmas = np.ones(len(pix))*2. # 2 ## Default value
+        mynewmask = np.array(np.copy(apmask), dtype=float)
+        mynewmask2 = np.array(np.copy(apmask2), dtype=float)
+        aperture_array_trace_pixel_min = aperture_array[j].trace_pixel_min
+        aperture_array_trace_pixel_max = aperture_array[j].trace_pixel_max
+        mydata = np.array(np.copy(data.data), dtype=float)
+        mynewmask, mynewmask2 = trace_apmask_aperture_fast(mynewmask, mynewmask2, pix, trace_vals, realaperture, profile_sigmas, 
+                                   above0, below0,
+                                   aperture_array_trace_pixel_min, aperture_array_trace_pixel_max, mydata)
+        # from IPython import embed
+        # embed()
+        # exit()
+
+        # for x in pix:
+        #     ymid=aperture_array[j].trace_func(x)
+        #     if apertures_profile_middle.realvirtual[j]:
+        #         profile_sigma=aperture_array[j].profile_sigma(x)
+        #     else:
+        #         profile_sigma = 2. # 2 ## Default value
+        #     # if (3.*profile_sigma > (above0-below0)/3.):
+        #     #     print("choosing wings size:")
+        #     #     print(3.*profile_sigma,(above0-below0)/3.)
+        #     wing=np.min([3.*profile_sigma,(above0-below0)/3.])
+        #     if wing>0.:
+        #         y1=np.long(ymid-wing)
+        #         y2=np.long(ymid+wing)
+        #         if apertures_profile_middle.realvirtual[j]:
+        #             apmask[y1:y2,x]=True
+        #             if ((x<aperture_array[j].trace_pixel_min)|(x>aperture_array[j].trace_pixel_max)):
+        #                 apmask[y1:y2,x]=True
+        #             if ((ymid<0.)|(ymid>len(data.data))):
+        #                 apmask[y1:y2,x]=True
+        #         ## Whether it is real or not, we populate the apmask2
+        #         apmask2[y1:y2,x]=True
+        #         if ((x<aperture_array[j].trace_pixel_min)|(x>aperture_array[j].trace_pixel_max)):
+        #             apmask2[y1:y2,x]=True
+        #         if ((ymid<0.)|(ymid>len(data.data))):
+        #             apmask2[y1:y2,x]=True
+    return apmask, apmask2
+
+
+def get_apflat(data,aperture_array,apertures_profile_middle,aperture_peak,image_boundary,apmask,field_name):
+    import numpy as np
+    import dill as pickle
+    import scipy
+    from astropy.nddata import CCDData
+    from specutils.spectra import Spectrum1D
+    import astropy.units as u
+    from astropy.nddata import StdDevUncertainty
+    import matplotlib.pyplot as plt
+
+    pix=np.arange(len(data.data[0]))
+    arr2d=np.zeros((len(data.data),len(data.data[0])))
+    apmask0=~apmask#np.array(data.mask,dtype=bool)
+
+    apflat_mask=mask_boundary(apmask0,image_boundary)
+
+    for j in range(0,len(aperture_array)):
+        print(j,len(aperture_array))
+        if apertures_profile_middle.realvirtual[j]:
+            
+            above0,below0=get_above_below(j,data,aperture_array,apertures_profile_middle,aperture_peak)
+
+            for x in pix:
+                ymid=aperture_array[j].trace_func(x)
+#                print(j,x,ymid)
+                profile_sigma=aperture_array[j].profile_sigma(x)
+                profile_amplitude=aperture_array[j].profile_amplitude(x)
+                wing=np.min([3.*profile_sigma,(above0-below0)/2./2.])
+                if wing>0.:
+                    y1=np.long(ymid-wing)
+                    y2=np.long(ymid+wing)
+                    if ((x<aperture_array[j].trace_pixel_min)|(x>aperture_array[j].trace_pixel_max)):
+                        apflat_mask[y1:y2,x]=True
+                    if ((ymid<0.)|(ymid>len(data.data))):
+                        apflat_mask[y1:y2,x]=True
+                    if (y1>=0)&(y2<=len(data.data)):
+                        sss=data[y1:y2+1,x]
+#                a.mask[y1:y2,x]=True
+                        for k in range(0,len(sss.data)):
+                            int1=0.5*(scipy.special.erf(ymid/profile_sigma/np.sqrt(2.))-scipy.special.erf((ymid-(y1-0.5+k))/profile_sigma/np.sqrt(2.)))
+                            int2=0.5*(scipy.special.erf(ymid/profile_sigma/np.sqrt(2.))-scipy.special.erf((ymid-(y1-0.5+k+1))/profile_sigma/np.sqrt(2.)))
+                            weight=int2-int1
+#                            print(k,y1,y2,ymid,len(sss.data),x)
+                            arr2d[y1+k,x]=weight*profile_amplitude*np.sqrt(2.*np.pi*profile_sigma**2)
+#                        print(weight,profile_amplitude,profile_sigma,data.data[y1+k,x],arr2d[y1+k,x],data.data[y1+k,x]/arr2d[y1+k,x])
+    residual=CCDData((data.data-arr2d)/data.uncertainty.quantity.value,uncertainty=StdDevUncertainty(data.uncertainty.quantity.value/data.uncertainty.quantity.value),unit=u.electron/u.electron,mask=apflat_mask)
+    rms=np.sqrt(np.mean((data.data[apmask==True]-arr2d[apmask==True])**2))
+    new_masked=np.where(np.abs(residual.data)>13.)#this flags the 'ghosts' default was 3. I'm trying 13.
+    if len(new_masked[0])>0:
+        if 'twilight' not in field_name:#when twilight is its own flat-field spectrum, this doesn't work
+            apflat_mask[new_masked]=True
+
+#    expected_2darray=CCDData(arr2d,unit=data.unit,mask=data.mask,uncertainty=StdDevUncertainty(np.full((len(data.data),len(data.data[0])),rms,dtype='float')))
+#    pickle.dump(expected_2darray,open('/nfs/nas-0-9/mgwalker.proj/m2fs/crap.pickle','wb'))
+#    np.pause()
+#    crap=data.uncertainty.quantity.value/arr2d
+#    shite=~apmask
+    apflat=CCDData(data.data/arr2d,unit=u.electron/u.electron,mask=apflat_mask,uncertainty=StdDevUncertainty(data.uncertainty.quantity.value/arr2d))
+
+#    apflat=data.multiply(expected_2darray)    
+ #   print(expected_2darray.uncertainty)
+ #   print(' ')
+#    apflatcorr=data.divide(apflat)
+    return apflat,residual

@@ -3,7 +3,7 @@
 #### IMPORTS ####
 import astropy
 from astropy.nddata import CCDData
-import m2fs_process as m2fs
+from . import m2fs_process as m2fs
 import os
 import pickle
 from os import path
@@ -17,7 +17,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('TkAgg')
 
-import function_dump as fdump
+from . import function_dump as fdump
 
 # test datafile: b0034_stitched.fits
 
@@ -96,7 +96,7 @@ class ReduceM2FS:
         self.scatteredlightcorr_order = 4
         self.scatteredlightcorr_rejection_iterations = 10
         self.scatteredlightcorr_rejection_sigma = 3.
-        self.extract1d_aperture_width = 5. # 3. #maximum (half-)width of aperture for extraction (too large and we get weird edge effects)
+        self.extract1d_aperture_width = 3. # 3. #maximum (half-)width of aperture for extraction (too large and we get weird edge effects)
         self.resolution_order = 1
         self.resolution_rejection_iteration = 10
         self.id_lines_continuum_rejection_sigma = 3.
@@ -134,8 +134,10 @@ class ReduceM2FS:
         self.twilight = False
 
         self.binning = [2,2] ## Default binning
-        self.filter = 'halphali' ## Will ignore - _ spaces and caps 
-        self.filter = 'dupreeblue' ## Will ignore - _ spaces and caps 
+        ## I set the default filter to None, meaning that if we do not set the correct filter
+        ## the program will stop.
+        self.filter = 'NONE' ## Will ignore - _ spaces and caps 
+        # self.filter = 'dupreeblue' ## Will ignore - _ spaces and caps 
         
         self.corrdark = False ## trigger to correct the dark from the science frames
         self.corr_apflat = False
@@ -207,6 +209,7 @@ class ReduceM2FS:
         self.set_binning(np.array(inidims))
         _fname = self.rawfiledict[(ccd, tile, self.sci_list[0])]
         filter = fits.getheader(_fname)['filter'].replace('_', '').lower()
+        print("Filter detected to be: {}".format(filter))
         self.set_filter(filter)
     
     def read_data(self):
@@ -329,8 +332,14 @@ class ReduceM2FS:
         self.rawfiledict = {} ## Contains all the path to all files, calibration and other.
         for ccd in ['r', 'b']:
             for tile in range(1, 5):
-                for fileoro in self.full_list:
+                for fileoro in self.all_list: ## Not the biases!
                     self.rawfiledict[(ccd, tile, fileoro)] = self.inpath \
+                                    + "{}{:04d}c{}.fits".format(ccd, fileoro, tile)
+                for fileoro in self.dark_list: ## Not the biases!
+                    self.rawfiledict[(ccd, tile, fileoro)] = self.darkpath \
+                                    + "{}{:04d}c{}.fits".format(ccd, fileoro, tile)
+                for fileoro in self.bias_list: ## Not the biases!
+                    self.rawfiledict[(ccd, tile, fileoro)] = self.biaspath \
                                     + "{}{:04d}c{}.fits".format(ccd, fileoro, tile)
 
         self.masterbiasframes = {}
@@ -409,11 +418,11 @@ class ReduceM2FS:
                 + "{}-stack-wavcal-array.pickle".format(ccd)
 
         ## Generate the output paths
-        self.plugmap_file = self.outpath \
+        self.plugmap_file = self.tmppath \
                             + "{}{:04d}-plugmap.pickle".format(self.ccd, self.led_ref)
-        self.plugmap_txtfile = self.outpath \
+        self.plugmap_txtfile = self.tmppath \
                             + "{}-plugmap.txt".format(self.ccd)
-        self.image_boundary_file = self.tmppath \
+        self.image_boundary_file = self.outpath \
                             + "{}{:04d}-image-boundary.pickle".format(self.ccd, self.led_ref)
         self.columnspec_array_file = self.tmppath \
                             + "{}{:04d}-columnspec-array.pickle".format(self.ccd, self.led_ref)
@@ -423,6 +432,8 @@ class ReduceM2FS:
                 + "{}{:04d}-aperture-array.pickle".format(self.ccd, self.led_ref)
         self.apmask_file =  self.outpath \
                 + "{}{:04d}-apmask.pickle".format(self.ccd, self.led_ref)
+        self.apmask2_file =  self.outpath \
+                + "{}{:04d}-apmask2.pickle".format(self.ccd, self.led_ref)
         self.apflat_file =  self.outpath \
                 + "{}{:04d}-apflat.pickle".format(self.ccd, self.led_ref)
         self.apflat_residual_file =  self.outpath \
@@ -459,12 +470,12 @@ class ReduceM2FS:
         for tile in range(1, 5):
             fdump.dark_corr(self.rawfiledict, self.ccd, tile, self.dark_list,
                             self.masterbiasframes[(self.ccd, tile)], 
-                            self.masterdarkframes[(self.ccd, tile)], self.binning)  
+                            self.masterdarkframes[(self.ccd, tile)], self.binning, self.corrbias)  
     def stitch_frames(self):
         ## For each file name, and for the global ccd, we combine the tiles.
         for file_id in self.all_list:
             fdump.stitch_frames(self.ccd, file_id, self.rawfiledict, self.masterbiasframes, 
-                                self.masterdarkframes, self.filedict, self.binning, self.corrdark)   
+                                self.masterdarkframes, self.filedict, self.binning, self.corrdark, self.corrbias) 
     def stitch_frames_nocorr(self):
         ## For each file name, and for the global ccd, we combine the tiles.
         for file_id in self.all_list:
@@ -474,7 +485,7 @@ class ReduceM2FS:
     ########################################
     ########################################
 
-    def gen_plugmap(self, filename=None):
+    def gen_plugmap(self, filename=None, overwrite=False):
         '''Function to read the fits header a build a plug map.
         The function will check all the fits headers for inconsistencies.
         For now we only check the ThAr, LED, and Science frames.
@@ -543,12 +554,27 @@ class ReduceM2FS:
 
         pickle.dump(plugmap_table_hdu, open(self.plugmap_file,'wb'))
 
-        plugstring = ""
-        for i in range(len(objtypes)):
-            plugstring += "{:2} {:10} {:10}\n".format(i+1, objtypes[i], identifiers[i])
-        f = open(self.plugmap_txtfile, 'w')
-        f.write(plugstring)
-        f.close()
+        writefile = True
+        if path.exists(self.plugmap_txtfile):
+            #
+            print(self.plugmap_txtfile + ' already exsists')
+            val = input("Do you really want to overwrite it? [y/n]")
+            if val.lower()=='y':
+                ## Make a copy of the file
+                import shutil
+                shutil.copyfile(self.plugmap_txtfile, self.plugmap_txtfile+'_bckp')
+                writefile = True
+            else:
+                writefile = False
+        
+        ## Write the file
+        if writefile:
+            plugstring = ""
+            for i in range(len(objtypes)):
+                plugstring += "{:2} {} {:10} {:10}\n".format(i+1, fibers[i], objtypes[i], identifiers[i])
+            f = open(self.plugmap_txtfile, 'w')
+            f.write(plugstring)
+            f.close()
 
         return plugmap_table_hdu
 
@@ -680,6 +706,12 @@ class ReduceM2FS:
         ## work file
         image_boundary_file = self.image_boundary_file
         image_boundary_exists=path.exists(image_boundary_file) # Exists?
+        if image_boundary_exists:
+            print('The image boundary file already exists. Are you sure you want to overwrite?')
+            cond = input('overwrite? [Yes/n]')
+            if cond.lower().strip()!='yes':
+                print('NOT overwriting.')
+                return 1
         # #
         # if ((image_boundary_exists)&(self.overwrite)):
         #     image_boundary0=pickle.load(open(image_boundary_file,'rb'))
@@ -706,6 +738,14 @@ class ReduceM2FS:
                        1250, 1520, 1780, 2056, 2056]) * revbin[0]
         y2 = np.array([0, 51,  290, 360, 790, 
                        1040, 1290, 1550, 1820, 2056]) * revbin[0]
+
+        ## Let's hardcode some new boundaries:
+        x1 = np.array([0, 0]) + 10
+        x2 = np.array([2048, 2048]) - 10
+        x2 = x2 * revbin[1]
+        y1 = np.array([0, 2056]) * revbin[0]
+        y2 = np.array([0, 2056]) * revbin[0]
+
         image_boundary0=m2fs.image_boundary()
         image_boundary_fiddle=False
         image_boundary = m2fs.image_boundary(lower=[(x1[q],y1[q]) 
@@ -725,6 +765,7 @@ class ReduceM2FS:
         ## work file
         image_boundary_file = self.image_boundary_file
         image_boundary_exists=path.exists(image_boundary_file) # Exists?
+        print('{} exists? : {}'.format(image_boundary_file, image_boundary_exists))
         #
         if ((image_boundary_exists)&(self.overwrite)):
             image_boundary0=pickle.load(open(image_boundary_file,'rb'))
@@ -778,7 +819,7 @@ class ReduceM2FS:
         apertures_profile_middle_exists=path.exists(apertures_profile_middle_file) # Exists?
 
         if((apertures_profile_middle_exists)&(self.overwrite)):
-            # print('loading existing '+apertures_profile_middle_file+', will overwrite')
+            print('loading existing '+apertures_profile_middle_file+', will overwrite')
             apertures_profile_middle,middle_column=pickle.load(open(apertures_profile_middle_file,'rb'))
         elif(not(apertures_profile_middle_exists)):
             middle_column=np.long(len(columnspec_array)/2)
@@ -789,13 +830,17 @@ class ReduceM2FS:
         ## This is completely dumb, but for now I have to bypass the code before in order to 
         ## set the middle column to something else. This means that I have to restart the find
         ## every time I run this function.
-        middle_column=np.long(len(columnspec_array)/4)
+        # middle_column=np.long(len(columnspec_array)/2)
         print('We are working on the middle_column: {}'.format(middle_column*self.trace_step))
-        apertures_profile_middle=columnspec_array[middle_column].apertures_profile
+        # apertures_profile_middle=columnspec_array[middle_column].apertures_profile
 
-        apertures_profile_middle=fdump.fiddle_apertures(columnspec_array,middle_column,
+        middle_column_arr = [middle_column]
+        apertures_profile_middle=fdump.fiddle_apertures(columnspec_array, middle_column_arr,
                                                         self.window, apertures_profile_middle,
                                                         'dummy.txt')
+
+        middle_column = middle_column_arr[0]
+        # print('Now middle_column is: {}'.format(middle_column))
 
         if((not apertures_profile_middle_exists)|(self.overwrite)):
             print('find() -> Overwriting {}'.format(apertures_profile_middle_file))
@@ -863,21 +908,24 @@ class ReduceM2FS:
         apertures_profile_middle_file = self.apertures_profile_middle_file
         aperture_array_exists=path.exists(aperture_array_file) # Exists?
         myframe = self.sci_list[2] # self.led_ref
+        myframe = self.led_list[0] # self.led_ref
         flat_file = self.filedict[(self.ccd, myframe)]
+        print("Plotting {}".format(flat_file))
         if aperture_array_exists:
             aperture_array = pickle.load(open(aperture_array_file,'rb'))
             image = fits.getdata(flat_file)
             aps = []
             for i in range(len(aperture_array)):
-                aps.append(aperture_array[i].trace_func(np.arange(len(image))))
+                aps.append(aperture_array[i].trace_func(np.arange(len(image[0]))))
             plt.figure()
-            plt.imshow(image, vmin=0, vmax=10)
+            plt.imshow(image, vmin=0, vmax=np.nanpercentile(image, 90))
             for i in range(len(aps)):
-                plt.plot(aps[i], color='black', linewidth=0.3)
+                plt.plot(aps[i], color='red', linewidth=0.3)
             plt.show()
 
     def apmask(self):
         apmask_file = self.apmask_file
+        apmask2_file = self.apmask2_file
         apertures_profile_middle_file = self.apertures_profile_middle_file
         aperture_array_file = self.aperture_array_file
         image_boundary_file = self.image_boundary_file
@@ -895,10 +943,19 @@ class ReduceM2FS:
             image_boundary=pickle.load(open(image_boundary_file,'rb'))
             data=astropy.nddata.CCDData.read(data_file)#format is such that data.data[:,0] has column-0 value in all rows
 
-            apmask0=m2fs.get_apmask(data,aperture_array,apertures_profile_middle,aperture_peak,image_boundary)
+            apmask0, apmask2=fdump.get_apmask(data,aperture_array,apertures_profile_middle,aperture_peak,image_boundary)
+            # apmask2=fdump.get_apmask2(data,aperture_array,apertures_profile_middle,aperture_peak,image_boundary)
             # apmask0[:] = False
-            pickle.dump(apmask0,open(apmask_file,'wb'))
+            # from IPython import embed
+            # embed()    
+            plt.figure()
+            yyy = apmask0
+            plt.imshow(yyy)#, vmin=np.nanpercentile(yyy, 10), vmax=np.nanpercentile(yyy, 90))
+            plt.show()
 
+            pickle.dump(apmask0,open(apmask_file,'wb'))
+            pickle.dump(apmask2,open(apmask2_file,'wb'))
+        print('apmask done')
     def apflat(self):
         '''Hardcode the name of the field as dummy-led for now.
         In the code the comments checks whether the name is twilight. 
@@ -931,6 +988,13 @@ class ReduceM2FS:
             image_boundary=pickle.load(open(image_boundary_file,'rb'))
             apmask0=pickle.load(open(apmask_file,'rb'))
             data=astropy.nddata.CCDData.read(data_file)#format is such that data.data[:,0] has column-0 value in all rows
+
+            # from IPython import embed
+            # embed()    
+            # plt.figure()
+            # yyy = apflat_residual.data
+            # plt.imshow(yyy)#, vmin=np.nanpercentile(yyy, 10), vmax=np.nanpercentile(yyy, 90))
+            # plt.show()
 
             apflat0,apflat_residual=m2fs.get_apflat(data,aperture_array,apertures_profile_middle,
                                                     aperture_peak,image_boundary,apmask0,"dummy")
@@ -970,6 +1034,30 @@ class ReduceM2FS:
                     else:
                         data_noflat = data.divide(data)
                         apflatcorr0=data.divide(data_noflat)
+
+
+                # from IPython import embed
+                # embed()            
+
+                plt.figure()
+                # plt.imshow(data, vmin=np.nanpercentile(data, 10), vmax=np.nanpercentile(data, 90))
+                yyy = apflatcorr0.data#-
+                yyy[np.isinf(yyy)] = np.nan
+                # yyy = oscan_subtracted
+                plt.imshow(yyy, vmin=np.nanpercentile(yyy, 10), vmax=np.nanpercentile(yyy, 90))
+                # plt.imshow(oscan_subtracted)
+                plt.show()
+
+
+                plt.figure()
+                # plt.imshow(data, vmin=np.nanpercentile(data, 10), vmax=np.nanpercentile(data, 90))
+                yyy = data.data - apflatcorr0.data
+                yyy[np.isinf(yyy)] = np.nan
+                # yyy = oscan_subtracted
+                plt.imshow(yyy, vmin=np.nanpercentile(yyy, 10), vmax=np.nanpercentile(yyy, 90))
+                # plt.imshow(oscan_subtracted)
+                plt.show()
+
                 print(data_file,apflat_file,apflatcorr_file)
                 pickle.dump(apflatcorr0,open(apflatcorr_file,'wb'))
             ## Now set a flag if the file now exists:
@@ -977,10 +1065,12 @@ class ReduceM2FS:
                 self.apflat_corrected = True
 
     def scatteredlightcorr(self):
-        apmask_file = self.apmask_file
+        apmask_file = self.apmask2_file
 
         allfile0 = self.all_list
         for file_id in allfile0:
+        # for file_id in [36]:
+            print('scattered light correction for {}'.format(file_id))
             data_file = self.filedict[(self.ccd, file_id)]
             apflatcorr_file = self.apflatcorr_files[(self.ccd, file_id)]
             scatteredlightcorr_file = self.scatteredlightcorr_files[(self.ccd, file_id)]
@@ -997,7 +1087,7 @@ class ReduceM2FS:
                     apflatcorr0=pickle.load(open(apflatcorr_file,'rb'))
                 else:
                     apflatcorr0=astropy.nddata.CCDData.read(data_file)
-                scatteredlightfunc=m2fs.get_scatteredlightfunc(data,apmask0,
+                scatteredlightfunc=fdump.get_scatteredlightfunc(data,apmask0,
                                                                self.scatteredlightcorr_order,
                                                                self.scatteredlightcorr_rejection_iterations,
                                                                self.scatteredlightcorr_rejection_sigma)
@@ -1007,6 +1097,29 @@ class ReduceM2FS:
                                         uncertainty=StdDevUncertainty(np.full((len(data.data),len(data.data[0])),
                                                                               scatteredlightfunc.rms,dtype='float')))
                 scatteredlightcorr0=apflatcorr0.subtract(scattered_model)
+                # scatteredlightcorr0=apflatcorr0
+
+                # from IPython import embed
+                # embed()    
+                # plt.figure()
+                # yyy = scattered_model.data
+                # # yyy = data.data
+                # plt.imshow(yyy, vmin=np.nanpercentile(yyy, 10), vmax=np.nanpercentile(yyy, 90))
+                # plt.axhline(978, color='red')
+                # plt.axvline(2000, color='red')
+                # plt.colorbar()
+                # plt.show()
+
+                # plt.figure()
+                # plt.plot(data.data[1500, :])
+                # plt.plot(scattered_model.data[1500, :])
+                # plt.show()
+
+
+                # plt.figure()
+                # plt.plot(data.data[978, :])
+                # plt.plot(scattered_model.data[978, :])
+                # plt.show()
 
                 pickle.dump(scatteredlightcorr0,open(scatteredlightcorr_file,'wb'))  
                 pickle.dump(scattered_model,open(self.outpath+'{}{}-dumpscatterlight.pickle'.format(self.ccd, file_id),'wb'))  
@@ -1039,7 +1152,12 @@ class ReduceM2FS:
                 aperture_array=pickle.load(open(aperture_array_file,'rb'))
                 aperture_peak=[apertures_profile_middle.fit[q].mean.value for q in range(0,len(apertures_profile_middle.fit))]
                 data=astropy.nddata.CCDData.read(data_file)#format is such that data.data[:,0] has column-0 value in all rows
-                scatteredlightcorr0=pickle.load(open(scatteredlightcorr_file,'rb'))
+                if self.scatteredlight_corrected:
+                    scatteredlightcorr0=pickle.load(open(scatteredlightcorr_file,'rb'))
+                elif self.apflat_corrected:
+                    scatteredlightcorr0=pickle.load(open(self.apflatcorr_files[(self.ccd, file_id)],'rb'))
+                else:
+                    scatteredlightcorr0=astropy.nddata.CCDData.read(data_file)
                 pix=np.arange(len(scatteredlightcorr0.data[0]))
 
                 import time
@@ -1094,8 +1212,8 @@ class ReduceM2FS:
                 print("Time for extraction: {:0.2f} s".format(etime-itime))
                 # from IPython import embed
                 # embed()
-                if(len(extract1d_array)!=128):
-                    print('problem with extract1d_flat')
+                # if(len(extract1d_array)!=128):
+                #     print('problem with extract1d_flat')
                     # np.pause()
                 pickle.dump(extract1d_array,open(extract1d_array_file,'wb'))
 
@@ -1127,7 +1245,10 @@ class ReduceM2FS:
             ## TODO: Issue here due to the fact that we use the first extract1d_array, but the first could be 
             ## a virtual aperture... (or a masked one), so the mask is True everywhere.
             realvirtualarray = np.loadtxt(self.outpath+ 'real-virtual-array.txt')
-            firstreal = np.where(realvirtualarray>0.5)[0][0]
+            ## Let's take the middle aperture
+            realap_pos = np.where(realvirtualarray>0.5)[0]
+            mid = len(realap_pos)//2
+            firstreal = realap_pos[mid] ## 1xN_apertures
             # print("We use the first real aperture, which is number: {}".format(firstreal))
             id_lines_template0=fdump.get_id_lines_template(extract1d_array[firstreal],linelist,
                                                           self.id_lines_continuum_rejection_low,
@@ -1157,7 +1278,10 @@ class ReduceM2FS:
 
         ## This is to identify the first real aperture.
         realvirtualarray = np.loadtxt(self.outpath+ 'real-virtual-array.txt')
-        firstreal = np.where(realvirtualarray>0.5)[0][0]
+        ## Let's take the middle aperture
+        realap_pos = np.where(realvirtualarray>0.5)[0]
+        mid = len(realap_pos)//2
+        firstreal = realap_pos[mid] ## 1xN_apertures
     
         for file_id in self.arc_list:
             extract1d_array_file = self.extract1d_array_files[(self.ccd, file_id)] ## output file
@@ -1196,6 +1320,7 @@ class ReduceM2FS:
                 
                 id_lines_array=[]
                 for j in range(0,len(extract1d_array)): ## iterate through apertures.
+                # for j in range(40,len(extract1d_array)): ## iterate through apertures.
                     print('working on aperture ',j)
                     id_lines_array.append(fdump.get_id_lines_translate(extract1d_array_template[firstreal],
                                                                       id_lines_template0,extract1d_array[j], linelist,
@@ -1231,7 +1356,6 @@ class ReduceM2FS:
         Here again, filters stuff that I don't really understand and therefore bypass.'''
 
 
-
         thar,thar_lines,thar_temperature,thar_exptime,thar_mjd=fdump.get_thar(self.filedict,
                                                                               self.ccd, self.arc_list,
                                                                               self.lco, self.use_flat,
@@ -1253,7 +1377,10 @@ class ReduceM2FS:
                     
                     extract1d_array=pickle.load(open(extract1d_array_file,'rb'))
                     data=astropy.nddata.CCDData.read(data_file)#format is such that data.data[:,0] has column-0 value in all rows
-                    time0=[data.header['DATE-OBS']+'T'+data.header['UT-TIME'],data.header['DATE-OBS']+'T'+data.header['UT-END']]
+                    if 'T' in data.header['DATE-OBS']:
+                        time0=[data.header['DATE-OBS'],data.header['DATE-OBS'].replace(data.header['UT-TIME'], data.header['UT-END'])]
+                    else:
+                        time0=[data.header['DATE-OBS']+'T'+data.header['UT-TIME'],data.header['DATE-OBS']+'T'+data.header['UT-END']]
                     times=time.Time(time0,location=self.lco, precision=6)
                     mjd=np.mean(times.mjd)
                     filtername=data.header['FILTER']
@@ -1855,7 +1982,10 @@ class ReduceM2FS:
                     id_lines_minlines=self.id_lines_minlines_medres
                 else: ## PIC: this is me bypassing
                     id_lines_minlines=self.id_lines_minlines_hires
-                time0=[data.header['DATE-OBS']+'T'+data.header['UT-TIME'],data.header['DATE-OBS']+'T'+data.header['UT-END']]
+                if 'T' in data.header['DATE-OBS']:
+                    time0=[data.header['DATE-OBS'],data.header['DATE-OBS'].replace(data.header['UT-TIME'], data.header['UT-END'])]
+                else:
+                    time0=[data.header['DATE-OBS']+'T'+data.header['UT-TIME'],data.header['DATE-OBS']+'T'+data.header['UT-END']]
                 times=time.Time(time0,location=self.lco,precision=6)
                 mjd_mid.append(np.mean(times.mjd))
                 var_med0=[]
@@ -2130,17 +2260,33 @@ class ReduceM2FS:
             reffile = self.extract1d_array_files[(self.ccd, self.led_ref)]     
         led_array = pickle.load(open(reffile, 'rb'))
 
+
+        # from IPython import embed
+        # embed()
+
+
+        # plt.figure()
+        # plt.plot(led_array[3].spec1d_flux)
+        # plt.show()
+
+        # plt.figure()
         ## Get the continuum of the flats
         continua = []
         for i in range(len(led_array)):
             meanflatspec = np.nanmax(led_array[i].spec1d_flux)
             flatspec = led_array[i].spec1d_flux / meanflatspec
-            smoothflatspec, c = norm_tools.moving_median(flatspec, 10)
-            c[c<0.1] = np.nan
+            smoothflatspec, c = norm_tools.moving_median(flatspec, 10, btd=0)
+            c[c<0.0001] = np.nan
             continua.append(c)
+        #     plt.plot(flatspec-i)
+        #     plt.plot(c-i)
+        # plt.show()
+
+        # from IPython import embed
+        # embed()
         pickle.dump(continua, open(self.ref_array_files_flat[self.ccd], 'wb'))
 
-
+        ## Then normalize the spectra by the flat.
         mylist = [self.sci_list[i] for i in range(len(self.sci_list))]
         mylist.append(self.arc_ref)
         for file_id in mylist:
