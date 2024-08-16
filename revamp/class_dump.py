@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 matplotlib.use('TkAgg')
 
 from . import function_dump as fdump
+from . import interactive_plot as intacplot
 
 # test datafile: b0034_stitched.fits
 
@@ -100,7 +101,7 @@ class ReduceM2FS:
         self.resolution_order = 1
         self.resolution_rejection_iteration = 10
         self.id_lines_continuum_rejection_sigma = 3.
-        self.id_lines_tol_angs = 0.05 # 0.005 # tolerance for finding new lines to add from linelist (Angstroms)
+        self.id_lines_tol_angs = 0.02 # 0.005 # tolerance for finding new lines to add from linelist (Angstroms)
         self.resolution_rejection_iterations = 10
         self.id_lines_continuum_rejection_low = -5.
         self.id_lines_continuum_rejection_high = 1.
@@ -907,7 +908,7 @@ class ReduceM2FS:
         columnspec_array_file = self.columnspec_array_file
         apertures_profile_middle_file = self.apertures_profile_middle_file
         aperture_array_exists=path.exists(aperture_array_file) # Exists?
-        myframe = self.sci_list[2] # self.led_ref
+        myframe = self.sci_list[0] # self.led_ref
         myframe = self.led_list[0] # self.led_ref
         flat_file = self.filedict[(self.ccd, myframe)]
         print("Plotting {}".format(flat_file))
@@ -1175,7 +1176,11 @@ class ReduceM2FS:
                         extract1d0=fdump.get_extract1d(k,scatteredlightcorr0,apertures_profile_middle,
                                                       aperture_array,aperture_peak,pix,
                                                       self.extract1d_aperture_width)
-                        
+                        # from IPython import embed
+                        # embed()
+                        # plt.figure()
+                        # plt.plot(extract1d0.spec1d_flux)
+                        # plt.show()
                         ## PIC: The following was again to test that my new implementation of the extraction gives the
                         ## same results as the old function.
                         ## The new function using numba is about 30 to 80 times faster than the old one.
@@ -1250,7 +1255,7 @@ class ReduceM2FS:
             mid = len(realap_pos)//2
             firstreal = realap_pos[mid] ## 1xN_apertures
             # print("We use the first real aperture, which is number: {}".format(firstreal))
-            id_lines_template0=fdump.get_id_lines_template(extract1d_array[firstreal],linelist,
+            id_lines_template0=intacplot.get_id_lines_template(extract1d_array[firstreal],linelist,
                                                           self.id_lines_continuum_rejection_low,
                                                           self.id_lines_continuum_rejection_high,
                                                           self.id_lines_continuum_rejection_iterations,
@@ -2008,7 +2013,8 @@ class ReduceM2FS:
 
             stack_array=[]
             for j in range(0,len(stack0[0])):
-                stack_array.append(m2fs.get_stack(stack0,j))
+                # stack_array.append(m2fs.get_stack(stack0,j))
+                stack_array.append(fdump.get_stack(stack0,j))
             pickle.dump(stack_array, open(stack_array_file,'wb'))#save pickle to file
 
     def stack_frames(self):
@@ -2035,6 +2041,10 @@ class ReduceM2FS:
             stack_wavcal_array_file = self.stack_wavcal_array_files_nosky[self.ccd]
         stack_array=pickle.load(open(stack_array_file,'rb'))
         stack_wavcal_array=pickle.load(open(stack_wavcal_array_file,'rb'))
+
+        ## PIC: I find that the stacking can be problematic. Since it consists in
+        ## taking some sort of median of the spectra, I propose to bypass this here,
+        ## and rather take the median of the spectra in a post-processing step.
 
         ## PIC: I add this cause apparently we need it for the get_hdul function
         aperture_array_file = self.aperture_array_file

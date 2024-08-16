@@ -173,9 +173,18 @@ def stitch_frames_nocorr(ccd, file_id, rawfiledict, masterbiasframes, masterdark
         data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
         gain=np.float(data.header['egain'])
 
-        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,revbin[1]*1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
+        oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,revbin[1]*1024:],overscan_axis=1,model=models.Polynomial1D(1),add_keyword={'oscan_corr':'Done'})
         trimmed1=ccdproc.trim_image(oscan_subtracted[:,:revbin[1]*1024],add_keyword={'trim1':'Done'})
         trimmed2=ccdproc.trim_image(trimmed1[:revbin[0]*1028,:revbin[1]*1024],add_keyword={'trim2':'Done'})
+        
+        # plt.figure()
+        # plt.plot(np.mean(oscan_subtracted, axis=0))
+        # # plt.plot(oscan_subtracted.data[10])
+        # # plt.plot(np.median(data, axis=0))
+        # plt.axhline(0)
+        # plt.show()
+        # from IPython import embed
+        # embed()
 
 #         debiased0=ccdproc.subtract_bias(trimmed2,master_bias)
 #         dedark0=ccdproc.subtract_dark(debiased0,master_dark,exposure_time='exptime',exposure_unit=u.second,scale=True,add_keyword={'dark_corr':'Done'})
@@ -282,6 +291,34 @@ def compute_flux_tile_fast(data, uncertainty, darkdata, darkuncertainty, biasunc
     # print("Uncertainty computation {:0.0f}%".format(k/ntot*100))
     return uncertainty
 
+@jit(nopython=True)
+def rescale_variances(gain_corr_data, gain_uncertainty_value, 
+                      master_dark_data, master_dark_uncertainty, 
+                      master_bias_uncertainty, 
+                      gain, exptime_ratio, obs_readnoise):
+    '''gain_corr_data is gain_corrected2
+    gain_uncertainty_value is gain_corrected2.uncertainty.quantity.value
+    master_dark_data is master_dark.data
+    master_dark_uncertainty is master_dark.uncertainty.quantity.value
+    master_bias_uncertainty is master_bias.uncertainty.quantity.value'''
+    ## PIC I am not what the entire thing below was. It seems that the latest version
+    ## of the code was doing something like that:
+    for k in range(0,len(gain_corr_data)):
+        for q in range(0,len(gain_corr_data[k])):
+            ##rescale variances using empirically-determined fudges that hold
+            ##when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+            gain_uncertainty_value[k][q]=(
+                np.max(
+                    np.array([gain_corr_data[k][q]
+                              +master_dark_data[k][q]*gain*exptime_ratio
+                              +2.+obs_readnoise**2
+                              +(master_dark_uncertainty[k][q]*gain*exptime_ratio)**2
+                              +(master_bias_uncertainty[k][q]*gain)**2,
+                              0.6*(obs_readnoise**2
+                                   +(master_dark_uncertainty[k][q]*gain*exptime_ratio)**2
+                                   +(master_bias_uncertainty[k][q]*gain)**2)])))**0.5
+    return gain_uncertainty_value
+
 def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes, filedict, binning, corrdark=False, corrbias=False):
     # for filename in framelist:
     # for file_id in all_list:
@@ -313,14 +350,29 @@ def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes,
         if corrbias:
             debiased0=ccdproc.subtract_bias(trimmed2,master_bias)
         else:
+            print('Not correcting by bias')
             debiased0=trimmed2
         if corrdark:
             master_dark=astropy.nddata.CCDData.read(masterdarkfile)
             dedark0=ccdproc.subtract_dark(debiased0,master_dark,exposure_time='exptime',exposure_unit=u.second,scale=True,add_keyword={'dark_corr':'Done'})
         else:
+            print('Not correcting by dark')
             dedark0 = debiased0
-        data_with_deviation=ccdproc.create_deviation(dedark0,gain=data.meta['egain']*u.electron/u.adu,readnoise=obs_readnoise*u.electron)
+        
+        # from IPython import embed
+        # embed()
 
+
+        # # _y = data_with_deviation.uncertainty.array
+        # # _y = data_with_deviation.data
+        # # _y = oscan_subtracted.data
+        # _y = oscan_subtracted.data
+        # plt.imshow(_y, vmin=np.nanpercentile(_y, 10), vmax=np.nanpercentile(_y, 90))
+        # # plt.imshow(_y)#, vmin=np.nanpercentile(_y, 10), vmax=np.nanpercentile(_y, 90))
+        # plt.colorbar()
+        # plt.show()
+
+        data_with_deviation=ccdproc.create_deviation(dedark0,gain=data.meta['egain']*u.electron/u.adu,readnoise=obs_readnoise*u.electron)
         gain_corrected=ccdproc.gain_correct(data_with_deviation,data_with_deviation.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
 #                master_dark_gain_corrected=ccdproc.gain_correct(master_dark,master_dark.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
 #                master_bias_gain_corrected=ccdproc.gain_correct(master_bias,master_bias.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
@@ -344,6 +396,39 @@ def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes,
                                _uncertaintybias,
                                corrdark, gain, exptime_ratio, obs_readnoise, ntot)
         gain_corrected2.uncertainty = uncertainty
+
+        ## PIC I am not what the entire thing below was. It seems that the latest version
+        ## of the code was doing something like that:
+        #
+        # for k in range(0,len(gain_corrected2.data)):
+        #     for q in range(0,len(gain_corrected2.data[k])):
+        #         gain_corrected2.uncertainty.quantity.value[k][q]=(np.max(np.array([gain_corrected2.data[k][q]+master_dark.data[k][q]*gain*exptime_ratio+2.+obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2,0.6*(obs_readnoise**2+(master_dark.uncertainty.quantity.value[k][q]*gain*exptime_ratio)**2+(master_bias.uncertainty.quantity.value[k][q]*gain)**2)])))**0.5##rescale variances using empirically-determined fudges that hold when readnoise ~ 2.5 electrons (via S. Koposov, private comm. May 2020)
+        ## Doing the same but with a jit function
+
+        '''gain_corr_data is gain_corrected2
+        gain_uncertainty_value is gain_corrected2.uncertainty.quantity.value
+        master_dark_data is master_dark.data
+        master_dark_uncertainty is master_dark.uncertainty.quantity.value
+        master_bias_uncertainty is master_bias.uncertainty.quantity.value'''
+        gain_corr_data = np.array(gain_corrected2.data, dtype=float)
+        gain_uncertainty_value = np.array(gain_corrected2.uncertainty.quantity.value.data, dtype=float)
+        master_dark_data = np.array(master_dark.data, dtype=float)
+        master_dark_uncertainty = np.array(master_dark.uncertainty.quantity.value, dtype=float)
+        master_bias_uncertainty = np.array(master_bias.uncertainty.quantity.value, dtype=float)
+        #
+        gain_uncertainty_value = rescale_variances(gain_corr_data, gain_uncertainty_value, 
+                      master_dark_data, master_dark_uncertainty, 
+                      master_bias_uncertainty, 
+                      gain, exptime_ratio, obs_readnoise)
+        # #
+        # ## PIC I also tried to set the uncertainty manually
+        # gain_corrected2.uncertainty = np.sqrt(np.sqrt(gain_corrected2.data)**2+obs_readnoise**2)
+        ## PIC But everything leads to larger noise here...
+        ## Instead I bypass the uncertainty to take the average only
+        gain_corrected2.uncertainty = np.sqrt(gain_corrected2.data)*0+1
+
+        #gain_corrected2.uncertainty = gain_uncertainty_value*0+1
+        # gain_corrected2.mask[np.isnan(gain_corrected2.uncertainty.array)] = True
 #         for k in range(0,len(gain_corrected2.data)):
 #             for q in range(0,len(gain_corrected2.data[k])):
 #                 if corrdark:
@@ -688,6 +773,9 @@ def on_key_id_lines(event,args_list):
         command=input('enter wavelength in Angstroms \n')
         if command=='':
             print('no information entered')
+        elif not command.replace('.', '').isnumeric():
+            print('Please enter a float') 
+            pass ## Avoid breaking the program if there was a alpha value in the command
         else:
             id_lines_pix.append(line_centers[best])
             id_lines_wav.append(np.float(command))
@@ -810,6 +898,7 @@ def fiddle_apertures(columnspec_array,columnarr,window,apertures,find_apertures_
         if not realvirtual[j]:
             ax1.axvline(x=fit[j].mean.value,color='k',lw=0.5,alpha=1,linestyle='--')
 
+    thsarr = [0.05] ## default threshold
     print('\n')
     print('press \'r\' to reset all apertures fits \n')
     print('press \'g\' to iteratively fit all the apertures using maximum peak \n')
@@ -828,7 +917,7 @@ def fiddle_apertures(columnspec_array,columnarr,window,apertures,find_apertures_
     cid=fig.canvas.mpl_connect('key_press_event',lambda event: on_key_find(event,[columnspec_array,
                                                                                   columnarr,subregion,
                                                                                   fit,realvirtual,
-                                                                                  initial,window,fig]))
+                                                                                  initial,window,fig,thsarr]))
     plt.show()
     # print('This is the column I get: {}'.format(column))
 #    plt.savefig(find_apertures_file,dpi=200)
@@ -844,11 +933,14 @@ def on_key_find(event,args_list):
     from specutils.spectra import Spectrum1D
 
     print('you pressed ', event.key)
-    keyoptions = ['z', 'd', 'e', 'n', 'a', 'q', 'r', 'g', 'h', ' H', 'j', 'p', 'c', 'k', 'K']
+    keyoptions = ['z', 'd', 'e', 'n', 'a', 'q', 'r', 'g', 'h', ' H', 'j', 'p', 'c', 'k', 'K', 't']
 
     global columnspec_array,columnarr,subregion,fit,realvirtual,initial,window
-    columnspec_array,columnarr,subregion,fit,realvirtual,initial,window,fig=args_list
+    columnspec_array,columnarr,subregion,fit,realvirtual,initial,window,fig,thsarr=args_list
 
+
+    ths = float(thsarr[0])
+    # ths = 1/20 ## Threshold for peak detection
     # from IPython import embed
     # embed()
 
@@ -940,7 +1032,8 @@ def on_key_find(event,args_list):
                 del(initial[len(initial)-1])
             ## PIC: Iterate through everything:
             specarray = columnspec_array[column].spec ## That's the thing we plot
-            idx, _ = peak_finder(specarray)
+            print(ths)
+            idx, _ = peak_finder(specarray, ths)
             ntot = len(idx)
             for ieventxdata, eventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
@@ -954,6 +1047,10 @@ def on_key_find(event,args_list):
                 initial.append(False)
             subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
             print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100))
+
+        if event.key=='t':
+            ths = input('Enter new threshold [ths={:0.2f}]: '.format(ths))
+            thsarr[0] = ths
 
         if event.key=='h':
             ## PIC: First delete everything:
@@ -969,7 +1066,7 @@ def on_key_find(event,args_list):
                 del(initial[len(initial)-1])
             ## PIC: Iterate through everything:
             specarray = columnspec_array[column].spec ## That's the think we plot
-            idx, _ = peak_finder(specarray)
+            idx, _ = peak_finder(specarray, ths)
             ntot = len(idx)
             for ieventxdata, eventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
@@ -1013,7 +1110,7 @@ def on_key_find(event,args_list):
                 del(initial[len(initial)-1])
             ## PIC: Iterate through everything:
             specarray = columnspec_array[column].spec ## That's the think we plot
-            # idx, _ = peak_finder(specarray)
+            # idx, _ = peak_finder(specarray, ths)
             idx = initpos
             ntot = len(idx)
             for ieventxdata, eventxdata in enumerate(idx):
@@ -1057,7 +1154,7 @@ def on_key_find(event,args_list):
             # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
             ## PIC: Iterate through everything:
             specarray = columnspec_array[column].spec ## That's the think we plot
-            idx, _ = peak_finder(specarray)
+            idx, _ = peak_finder(specarray, ths)
             ntot = len(idx)
             for ieventxdata, enventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
@@ -1110,7 +1207,7 @@ def on_key_find(event,args_list):
             # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
             ## PIC: Iterate through everything:
             specarray = columnspec_array[column].spec ## That's the think we plot
-            idx, _ = peak_finder(specarray)
+            idx, _ = peak_finder(specarray, ths)
             ntot = len(idx)
             allowed_apertures = []
             for iii in range(150):
@@ -1169,7 +1266,7 @@ def on_key_find(event,args_list):
             # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
             ## PIC: Iterate through everything:
             specarray = columnspec_array[column].spec ## That's the think we plot
-            # idx, _ = peak_finder(specarray, ths=0, med=0)
+            # idx, _ = peak_finder(specarray, ths, ths=0, med=0)
             idx = initpos
             # ## Take the closest to those initially found
             # mynewidx = np.copy(idx)
@@ -1227,7 +1324,7 @@ def on_key_find(event,args_list):
             # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
             ## PIC: Iterate through everything:
             specarray = columnspec_array[column].spec ## That's the think we plot
-            idx, _ = peak_finder(specarray)
+            idx, _ = peak_finder(specarray, ths)
             ntot = len(idx)
             for ieventxdata, enventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
@@ -1289,7 +1386,7 @@ def on_key_find(event,args_list):
     ax1.cla()
     ax1.plot(columnspec_array[column].pixel,columnspec_array[column].spec,lw=0.3,color='k')
     # specarray = columnspec_array[column].spec ## That's the thing we plot
-    # idx = peak_finder(specarray)
+    # idx = peak_finder(specarray, ths)
     # for i in range(len(idx)):
     #     ax1.axvline(idx[i])
     ax1.plot(columnspec_array[column].pixel,columnspec_array[column].continuum(x),color='green',lw=1)
@@ -1436,6 +1533,9 @@ def get_id_lines_template(extract1d,linelist,continuum_rejection_low,continuum_r
     from copy import deepcopy
     from astropy.modeling import models,fitting
 
+    global firstvalue, secondvalue
+    firstvalue, secondvalue = None, None
+
     continuum0,spec_contsub,fit_lines=get_fitlines(extract1d,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,threshold_factor,window,continuum_rejection_order)
     idlinestemplate_data = [continuum0, spec_contsub.spectral_axis.value, spec_contsub.flux.value, fit_lines]
     pickle.dump(idlinestemplate_data,open(idlinestemplate_datafile,'wb')) 
@@ -1470,10 +1570,11 @@ def get_id_lines_template(extract1d,linelist,continuum_rejection_low,continuum_r
     print('press \'t\' to change number of rejection iterations \n')
     print('press \'g\' to re-fit wavelength solution \n')
     print('press \'l\' to add lines from linelist according to fit \n')
+    print('press \'i\' identify regions of the spectrum to remove \n')
     print('press \'q\' to quit \n')
     print('press \'.\' to print cursor position and position of nearest line \n')
-    fig.canvas.mpl_disconnect(fig.canvas.manager.key_press_handler_id) # PIC This disable any key that was not set up.
-    cid=fig.canvas.mpl_connect('key_press_event',lambda event: on_key_id_lines(event,[deepcopy(extract1d),continuum0,fit_lines,linelist,line_centers,id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints,id_lines_tol_angs,fig]))
+    fig.canvas.mpl_disconnect(fig.canvas.manager.key_press_handler_id) # PIC This disables any key that was not set up.
+    cid=fig.canvas.mpl_connect('key_press_event',lambda event: on_key_id_lines(event,[extract1d,continuum0,fit_lines,linelist,line_centers,id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints,id_lines_tol_angs,fig]))
     plt.show()
     plt.close()
 
@@ -1503,10 +1604,12 @@ def on_key_id_lines(event,args_list):
 
     #print('you pressed ',event.key)
 
-    keyoptions = ['.', 'm', 'd', 'o', 'r', 't', 'z', 'g', 'l', 'q', 'p']
+    keyoptions = ['.', 'm', 'd', 'o', 'r', 't', 'z', 'g', 'l', 'q', 'p', 'i']
 
     global id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints
     extract1d,continuum,fit_lines,linelist,line_centers,id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints,id_lines_tol_angs,fig=args_list
+
+    global firstvalue, secondvalue
 
     if event.key in keyoptions:
         if 'super' in event.key=='.':
@@ -1524,6 +1627,43 @@ def on_key_id_lines(event,args_list):
             else:
                 print('line not yet identified')
             print('function wavelength =',str(func[len(func)-1](line_centers[best])))
+
+        if event.key=='i':#delete nearest boundary point
+            # print('delete point nearest (',event.xdata,event.ydata,')')
+            # val1 = input('Enter the first bin of the window to delete')
+            # val2 = input('Enter the second bin of the window to delete')
+            # val1 = int(val1)
+            # val2 = int(val2)
+            if firstvalue is None:
+                firstvalue = event.xdata
+            else:
+                secondvalue = event.xdata
+            
+            # print('You pressed i:')
+            # print('{} {}'.format(firstvalue, secondvalue))
+
+            if firstvalue is not None:
+                if secondvalue is not None:
+                    val1 = firstvalue
+                    val2 = secondvalue
+                    if val2<val1:
+                        lval=val2
+                        hval=val1
+                    else:
+                        lval=val1
+                        hval=val2
+                    extract1d.spec1d_mask[int(lval):int(hval)] = True
+                    # from IPython import embed
+                    # embed()
+                    for j in range(len(line_centers)-1, 0, -1):
+                        if (line_centers[j]>lval) & (line_centers[j]<hval):
+                            line_centers.remove(line_centers[j])
+                            fit_lines.fit.remove(fit_lines.fit[j])
+                            fit_lines.initial.remove(fit_lines.initial[j])
+                            fit_lines.subregion.remove(fit_lines.subregion[j])
+                            fit_lines.realvirtual.remove(fit_lines.realvirtual[j])
+                    firstvalue = None
+                    secondvalue = None
 
         if event.key=='m':
             x0=event.xdata
@@ -1642,7 +1782,49 @@ def on_key_id_lines(event,args_list):
     fig.canvas.draw_idle()
     return
 
+def plot_id_lines(extract1d,continuum,fit_lines,line_centers,id_lines_pix,id_lines_wav,id_lines_used,func,fig):
+    import numpy as np
+    from astropy import units as u
 
+    # fig.clf() ## PIC test - that appears to correct the weird plotting issue.
+
+    xlim=[np.min(extract1d.spec1d_pixel[extract1d.spec1d_mask==False]),np.max(extract1d.spec1d_pixel[extract1d.spec1d_mask==False])]
+    ax1=fig.add_subplot(211)
+    ax1.cla()
+    ax1.set_xlim([np.min(extract1d.spec1d_pixel[extract1d.spec1d_mask==False]),np.max(extract1d.spec1d_pixel[extract1d.spec1d_mask==False])])
+    ax1.plot(extract1d.spec1d_pixel[extract1d.spec1d_mask==False],extract1d.spec1d_flux[extract1d.spec1d_mask==False],color='k',lw=0.5)
+    ax1.plot(extract1d.spec1d_pixel[extract1d.spec1d_mask==False],continuum(extract1d.spec1d_pixel[extract1d.spec1d_mask==False]),color='b',lw=0.3)
+    ax1.set_xlabel('pixel')
+    ax1.set_ylabel('counts')
+    ax1.set_xscale('linear')
+    ax1.set_yscale('linear')
+    ax1.set_xlim(xlim)
+    for j in range(0,len(fit_lines.fit)):
+        use=np.where((extract1d.spec1d_pixel>=fit_lines.subregion[j].lower.value)&(extract1d.spec1d_pixel<=fit_lines.subregion[j].upper.value))[0]
+        sub_spectrum_pixel=extract1d.spec1d_pixel[use]*u.AA
+        y_fit=fit_lines.fit[j](sub_spectrum_pixel).value+continuum(sub_spectrum_pixel.value)
+        ax1.plot(sub_spectrum_pixel,y_fit,color='r',lw=0.3)
+        ax1.axvline(x=fit_lines.fit[j].mean.value,linestyle=':',color='k',lw=0.3)
+    for j in range(0,len(id_lines_pix)):
+         ax1.axvline(x=id_lines_pix[j],color='g',lw=1,linestyle='-')
+#    ax1.text(0,1.01,'n_points='+str(npoints),transform=ax1.transAxes)
+#    ax1.text(0,1.06,'order='+str(order),transform=ax1.transAxes)
+#    ax1.text(0,1.11,'rms='+str(rms),transform=ax1.transAxes)
+#    ax1.text(1,1.01,'aperture='+str(j+1),horizontalalignment='right',transform=ax1.transAxes)
+    ax1.set_xscale('linear')
+    ax1.set_yscale('linear')
+
+    ax2=fig.add_subplot(212)
+    ax2.cla()
+#    ax2.scatter(id_lines_pix,id_lines_wav,color='k',s=3)
+    ax2.scatter(id_lines_pix,id_lines_wav-func(id_lines_pix),color='k',s=3)
+    x=extract1d.spec1d_pixel[extract1d.spec1d_mask==False]
+#    ax2.plot(x,func(x),color='r')
+    ax2.set_xlim(xlim)
+    ax2.set_xlabel('pixel')
+    ax2.set_ylabel(r'$\lambda$ [Angstroms]')
+
+    return ax1,ax2
 
 def get_meansky(throughputcorr_array,wavcal_array,plugmap):
     '''
@@ -3616,6 +3798,45 @@ def order_hkhires(plugmapdic, cassettes_order):
 
     return apertures, identifiers, objtypes, fibers
 
+def order_nadhiro60(plugmapdic, cassettes_order):
+    '''Function to order the dupreeblue filter.
+    The order has consecutive orders (1 per star only)'''
+
+    objtypes = []
+    apertures = []
+    identifiers = []
+    fibers = []
+
+    ## First pass: what are the valid fibers percassettes?
+    validfibers = {}
+    for cassette in cassettes_order:
+        _valids = []
+        for fibernb in range(16, 0, -1): ## from top to botton, for both ccd is the same
+            if 'unused' not in plugmapdic[cassette][fibernb]['objtype']: 
+                _valids.append(fibernb)
+        validfibers[cassette] = _valids.copy()
+
+    aperture=1 ## We're gonna count the apertures
+    for cassette in cassettes_order:
+        fiber_numbers = validfibers[cassette]
+        for iter in range(0, len(fiber_numbers), 1): ## from top to botton, for both ccd is the same
+            fibernb = fiber_numbers[iter]
+            if 'unused' in plugmapdic[cassette][fibernb]['objtype']: 
+                print("FIBER{}{:02d}".format(cassette, fibernb))
+                continue
+            if 'unused' in plugmapdic[cassette][fibernb]['objtype']: 
+                print("FIBER{}{:02d}".format(cassette, fiber_numbers[iter+1]))
+                continue
+            for order in [0]: ## There is only one order per fiber
+                # first fiber ## And only one fiber per star here
+                apertures.append(aperture)
+                objtypes.append(plugmapdic[cassette][fibernb]['objtype'])
+                identifiers.append(plugmapdic[cassette][fibernb]['identifier'])
+                fibers.append('FIBER{}{:02d}'.format(cassette, fibernb))
+                aperture+=1
+
+    return apertures, identifiers, objtypes, fibers
+
 def order_fibers(plugmapdic, ccd, filter):
     '''Function to order the fiber based on filter and CCD'''
     
@@ -3629,8 +3850,8 @@ def order_fibers(plugmapdic, ccd, filter):
         apertures, identifiers, objtypes, fibers = order_dupreeblue(plugmapdic, cassettes_order)
     elif 'hkhires' in filter:
         apertures, identifiers, objtypes, fibers = order_hkhires(plugmapdic, cassettes_order)
-    elif 'nadhiro60' in filter: ## I assume that the layout is the same for na filter
-        apertures, identifiers, objtypes, fibers = order_hkhires(plugmapdic, cassettes_order)
+    elif 'nadhiro60' in filter: ## I assume that the layout is the same for na filter --> EXCEPT IT ISN'T
+        apertures, identifiers, objtypes, fibers = order_nadhiro60(plugmapdic, cassettes_order)
     else:
         raise Exception('function_dump.order_fibers: unknown filter {}, try options: {}, {}'.format(filter, 'halphali', 'dupreeblue', 'hkhires'))
     return apertures, identifiers, objtypes, fibers
@@ -3759,12 +3980,15 @@ def numbaerf(x):
     y = 1.0 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t*np.exp(-x*x)
     return sign*y # erf(-x) = -erf(x)
 
-@jit(nopython=True)
+import scipy
+@jit(nopython=True, cache=True)
 def extract_aperture(pix, _data, _mask, _uncertainty, ymids, profile_sigmas, wings):
-    '''Jit function for fast extraction of an aperture'''
+    '''Jit function for fast extraction of an aperture'''    
     myspec = np.ones(len(pix))
     myerr = np.ones(len(pix))    
     mymask = np.ones(len(pix))*True
+    _data_debug = np.zeros(_data.shape)
+    _data_debug2 = np.zeros(_data.shape)
     for x in pix:
 #        wing=3.
         ymid = ymids[x]
@@ -3781,15 +4005,22 @@ def extract_aperture(pix, _data, _mask, _uncertainty, ymids, profile_sigmas, win
             sum1=0.
             sum2=0.
             for k in range(0,len(data)):
-                if mask[k]==False:
+                if (mask[k]==False) & (~np.isnan(uncertainty[k])):
                     int1=0.5*(numbaerf(ymid/profile_sigma/np.sqrt(2.))-numbaerf((ymid-(y1-0.5+k))/profile_sigma/np.sqrt(2.)))
                     int2=0.5*(numbaerf(ymid/profile_sigma/np.sqrt(2.))-numbaerf((ymid-(y1-0.5+k+1))/profile_sigma/np.sqrt(2.)))
+                    #
                     weight=int2-int1
 #                    sum1=sum1.add((sss[k].multiply(weight)).divide(uncertainty.quantity.value[k]**2))
                     if uncertainty[k]==0.:
                         print('extract_aperture: 0 value in uncertainty')
-                    sum1+=data[k]*weight/uncertainty[k]**2
-                    sum2+=weight**2/uncertainty[k]**2
+                    if np.isnan(uncertainty[k]):
+                        print('extract_aperture: NaN value in uncertainty')
+                    # sum1+=data[k]*weight/uncertainty[k]**2
+                    # sum2+=weight**2/uncertainty[k]**2
+                    sum1+=data[k]*weight
+                    sum2+=weight**2
+                    _data_debug[y1+k, x] = data[k]*weight/uncertainty[k]**2
+                    _data_debug2[y1+k, x] = data[k]*weight/uncertainty[k]**2
 #            val=sum1.divide(sum2)
             if sum2==0.:
                 # print('extract_aperture: 0 value in sum2')
@@ -3812,6 +4043,20 @@ def extract_aperture(pix, _data, _mask, _uncertainty, ymids, profile_sigmas, win
             mymask[x] = True
             myerr[x] = 999.
     
+    # from IPython import embed
+    # embed()
+    # plt.figure()
+    # plt.imshow(_data_debug, vmin=0, 
+    #            vmax=1)
+    # plt.show()
+
+    # plt.figure()
+    # plt.plot(np.mean(_data_debug, 0))
+    # plt.show()
+
+    # plt.figure()
+    # plt.plot(myspec)
+    # plt.show()
     return myspec, myerr, mymask        
 
 # @jit(nopython=True)
@@ -4126,3 +4371,49 @@ def get_apflat(data,aperture_array,apertures_profile_middle,aperture_peak,image_
  #   print(' ')
 #    apflatcorr=data.divide(apflat)
     return apflat,residual
+
+def weightedmeanspec(stack00):
+    import numpy as np
+
+    spec=[]
+    spec_err=[]
+    spec_mask=[]
+
+    for i in range(0,len(stack00[0].data)):
+        keep=np.where([stack00[q].mask[i]==False for q in range(0,len(stack00))])[0]
+        if len(keep)>0:
+            sum1=np.sum(np.array([stack00[q].data[i] for q in keep])/np.array([stack00[q].uncertainty.quantity.value[i] for q in keep])**2)
+            sum2=np.sum(1./np.array([stack00[q].uncertainty.quantity.value[i] for q in keep])**2)
+            
+            spec.append(sum1/sum2)
+            spec_err.append(np.sqrt(1./sum2))
+            spec_mask.append(False)
+#            sum1=np.sum(np.array([stack00[q].data[i] for q in keep]))
+#            sum2=np.sum(np.array([stack00[q].uncertainty.quantity.value[i] for q in keep])**2)
+#            spec.append(sum1)
+#            spec_err.append(np.sqrt(sum2))
+#            spec_mask.append(False)
+        else:
+            spec.append(0.)
+            spec_err.append(-999.)
+            spec_mask.append(True)
+    spec=np.array(spec)
+    spec_err=np.array(spec_err)
+    spec_mask=np.array(spec_mask)
+
+    return spec,spec_err,spec_mask
+    
+def get_stack(stack0,j):
+    from astropy.nddata import CCDData
+    from specutils.spectra import Spectrum1D
+    from astropy import units as u
+    from astropy.nddata import StdDevUncertainty
+    import numpy as np
+
+    stack00=[]
+    for q in range(0,len(stack0)):
+#        print(len(stack0),len(stack0[0]),len(stack0[q]),q,j)
+        stack00.append(CCDData(stack0[q][j].spec1d_flux,uncertainty=stack0[q][j].spec1d_uncertainty,mask=stack0[q][j].spec1d_mask))
+#        print(np.where(stack0[q][j].spec1d_mask==False)[0])
+    spec,spec_err,spec_mask=weightedmeanspec(stack00)
+    return m2fs.extract1d(aperture=stack0[q][j].aperture,spec1d_pixel=stack0[q][j].spec1d_pixel*u.AA,spec1d_flux=spec*u.electron,spec1d_uncertainty=StdDevUncertainty(spec_err),spec1d_mask=spec_mask)
