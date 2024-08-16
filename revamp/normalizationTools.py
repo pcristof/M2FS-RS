@@ -7,7 +7,6 @@ from numba import jit
 from scipy import optimize as opt
 from astropy.convolution import convolve_fft
 from astropy.stats import sigma_clip
-from irap_tools import paths
 
 @jit(nopython=True)
 def polynom(x,coeffs):#, degree=3):
