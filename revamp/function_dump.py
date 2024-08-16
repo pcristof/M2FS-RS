@@ -38,7 +38,7 @@ def zero_corr(filedict, color, ccd, bias_list, outfile, binning):
         trimmed1=ccdproc.trim_image(oscan_subtracted[:,:revbin[1]*1024],add_keyword={'trim1':'Done'})
         trimmed2=ccdproc.trim_image(trimmed1[:revbin[0]*1028,:revbin[1]*1024],add_keyword={'trim2':'Done'})
         array1d=trimmed2.data.flatten()
-        gain=np.float(trimmed2.header['egain'])
+        gain=float(trimmed2.header['egain'])
         keep=np.where(np.abs(array1d)<100.)[0] #remove crazy outliers
         obs_readnoise.append(np.std(array1d[keep]*gain))
 #                data_with_deviation=ccdproc.create_deviation(trimmed2,gain=data.meta['egain']*u.electron/u.adu,readnoise=data.meta['enoise']*u.electron)
@@ -167,11 +167,11 @@ def stitch_frames_nocorr(ccd, file_id, rawfiledict, masterbiasframes, masterdark
         outfile = filedict[(ccd, file_id)]
 
         # master_bias=astropy.nddata.CCDData.read(masterbiasfile)
-        # obs_readnoise=np.float(master_bias.header['obs_rdnoise'])
+        # obs_readnoise=float(master_bias.header['obs_rdnoise'])
         # master_dark=astropy.nddata.CCDData.read(masterdarkfile)
 
         data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
-        gain=np.float(data.header['egain'])
+        gain=float(data.header['egain'])
 
         oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,revbin[1]*1024:],overscan_axis=1,model=models.Polynomial1D(1),add_keyword={'oscan_corr':'Done'})
         trimmed1=ccdproc.trim_image(oscan_subtracted[:,:revbin[1]*1024],add_keyword={'trim1':'Done'})
@@ -200,7 +200,7 @@ def stitch_frames_nocorr(ccd, file_id, rawfiledict, masterbiasframes, masterdark
 #         gain_corrected2=deepcopy(gain_corrected)
 #         ## PIC: Just for fun I bypass the corrections here:
 #         # gain_corrected2.data=trimmed2.data
-#         exptime_ratio=np.float(data.header['exptime'])/np.float(master_dark.meta['exptime'])
+#         exptime_ratio=float(data.header['exptime'])/float(master_dark.meta['exptime'])
 
 #         ntot = len(gain_corrected2.data)
 #         for k in range(0,len(gain_corrected2.data)):
@@ -331,12 +331,12 @@ def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes,
         outfile = filedict[(ccd, file_id)]
 
         data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
-        gain=np.float(data.header['egain'])
+        gain=float(data.header['egain'])
 
         if corrbias:
             master_bias=astropy.nddata.CCDData.read(masterbiasfile)
             if 'obs_rdnoise' in master_bias.header:
-                obs_readnoise=np.float(master_bias.header['obs_rdnoise'])
+                obs_readnoise=float(master_bias.header['obs_rdnoise'])
             else:
                 obs_readnoise=0
         else:
@@ -379,7 +379,7 @@ def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes,
 
         gain_corrected2=deepcopy(gain_corrected)
         if corrdark:
-            exptime_ratio=np.float(data.header['exptime'])/np.float(master_dark.meta['exptime'])
+            exptime_ratio=float(data.header['exptime'])/float(master_dark.meta['exptime'])
         else:
             exptime_ratio=0.
         ntot = len(gain_corrected2.data)
@@ -500,11 +500,11 @@ def stitch_frames(ccd, file_id, rawfiledict, masterbiasframes, masterdarkframes,
 def stitch_frames_bad(framelist, masterbiasfile, masterdarkfile, outfile):
     for filename in framelist:
         master_bias=astropy.nddata.CCDData.read(masterbiasfile)
-        obs_readnoise=np.float(master_bias.header['obs_rdnoise'])
+        obs_readnoise=float(master_bias.header['obs_rdnoise'])
         master_dark=astropy.nddata.CCDData.read(masterdarkfile)
 
         data=astropy.nddata.CCDData.read(filename,unit=u.adu)#header is in data.meta
-        gain=np.float(data.header['egain'])
+        gain=float(data.header['egain'])
 
         oscan_subtracted=ccdproc.subtract_overscan(data,overscan=data[:,1024:],overscan_axis=1,model=models.Polynomial1D(3),add_keyword={'oscan_corr':'Done'})
         trimmed1=ccdproc.trim_image(oscan_subtracted[:,:1024],add_keyword={'trim1':'Done'})
@@ -520,7 +520,7 @@ def stitch_frames_bad(framelist, masterbiasfile, masterdarkfile, outfile):
 #                master_bias_gain_corrected=ccdproc.gain_correct(master_bias,master_bias.meta['egain']*u.electron/u.adu,add_keyword={'gain_corr':'Done'})
 
         gain_corrected2=deepcopy(gain_corrected)
-        exptime_ratio=np.float(data.header['exptime'])/np.float(master_dark.meta['exptime'])
+        exptime_ratio=float(data.header['exptime'])/float(master_dark.meta['exptime'])
 
         ntot = len(gain_corrected2.data)
         for k in range(0,len(gain_corrected2.data)):
@@ -614,28 +614,28 @@ def get_thar(filedict, ccd, id_list, lco, use_flat, exptime, id_lines_array_file
 #         if filtername=='Mgb_Rev2':
 #             filtername='Mgb_HiRes'
 #         if filtername=='Mgb_HiRes':
-#             if ((np.float(data.header['exptime'])>=hires_exptime)|('twilight' in field_name)):
+#             if ((float(data.header['exptime'])>=hires_exptime)|('twilight' in field_name)):
 #                 thar_mjd.append(np.mean(times.mjd))
 #                 thar.append(id_lines_array)
 # #                lines.append([id_lines_array[q].wav[id_lines_array[q].wav.mask==False] for q in range(0,len(id_lines_array))])
 #                 temperature.append(data.header['T-DOME'])
-#                 thar_exptime.append(np.float(data.header['exptime']))
+#                 thar_exptime.append(float(data.header['exptime']))
 #         if filtername=='Mgb_MedRes':
-#             if ((np.float(data.header['exptime'])>=medres_exptime)|('twilight' in field_name)):
+#             if ((float(data.header['exptime'])>=medres_exptime)|('twilight' in field_name)):
 #                 thar_mjd.append(np.mean(times.mjd))
 #                 thar.append(id_lines_array)
 # #                lines.append([id_lines_array[q].wav.data[id_lines_array[q].wav.mask==False] for q in range(0,len(id_lines_array))])
 #                 temperature.append(data.header['T-DOME'])
-#                 thar_exptime.append(np.float(data.header['exptime']))
+#                 thar_exptime.append(float(data.header['exptime']))
         ## -- 
         ## And simply writing:
         ## For a twilight, bypass exptime threshold
-        if ((np.float(data.header['exptime'])>=exptime)|('twilight' in field_name)): 
+        if ((float(data.header['exptime'])>=exptime)|('twilight' in field_name)): 
             thar_mjd.append(np.mean(times.mjd))
             thar.append(id_lines_array)
 #                lines.append([id_lines_array[q].wav[id_lines_array[q].wav.mask==False] for q in range(0,len(id_lines_array))])
             temperature.append(data.header['T-DOME'])
-            thar_exptime.append(np.float(data.header['exptime']))
+            thar_exptime.append(float(data.header['exptime']))
 
     temperature=np.array(temperature)
     thar_exptime=np.array(thar_exptime)
@@ -778,7 +778,7 @@ def on_key_id_lines(event,args_list):
             pass ## Avoid breaking the program if there was a alpha value in the command
         else:
             id_lines_pix.append(line_centers[best])
-            id_lines_wav.append(np.float(command))
+            id_lines_wav.append(float(command))
             id_lines_used.append(best)
 
     if event.key=='d':#delete nearest boundary point
@@ -810,7 +810,7 @@ def on_key_id_lines(event,args_list):
         if command=='':
             print('keeping original value')
         else:
-            rejection_sigma.append(np.float(command))
+            rejection_sigma.append(float(command))
         func0,rms0,npoints0,y=m2fs.id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
         func.append(func0)
         rms.append(rms0)
@@ -1008,7 +1008,7 @@ def on_key_find(event,args_list):
             subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
 
         if event.key=='n':
-            new_center=np.float(event.xdata)
+            new_center=float(event.xdata)
             x_center=new_center
             spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
             subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
@@ -1037,7 +1037,7 @@ def on_key_find(event,args_list):
             ntot = len(idx)
             for ieventxdata, eventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
-                new_center=np.float(eventxdata)
+                new_center=float(eventxdata)
                 x_center=new_center
                 spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
                 subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
@@ -1071,7 +1071,7 @@ def on_key_find(event,args_list):
             for ieventxdata, eventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
                 if (ieventxdata%2)==0:
-                    new_center=np.float(eventxdata)
+                    new_center=float(eventxdata)
                     x_center=new_center
                     spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
                     subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
@@ -1081,12 +1081,12 @@ def on_key_find(event,args_list):
                     initial.append(False)
                     # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
                 else:
-                    new_center=np.float(eventxdata)
+                    new_center=float(eventxdata)
                     x_center=new_center
                     val1=x_center-window/2.
                     val2=x_center+window/2.
                     subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
-                    aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+                    aaa=float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
                     halfwindow=window/2.
                     fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
                     realvirtual.append(False)
@@ -1116,7 +1116,7 @@ def on_key_find(event,args_list):
             for ieventxdata, eventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
                 if (ieventxdata%2)==0:
-                    new_center=np.float(eventxdata)
+                    new_center=float(eventxdata)
                     x_center=new_center
                     spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
                     subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
@@ -1126,12 +1126,12 @@ def on_key_find(event,args_list):
                     initial.append(False)
                     # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
                 else:
-                    new_center=np.float(eventxdata)
+                    new_center=float(eventxdata)
                     x_center=new_center
                     val1=x_center-window/2.
                     val2=x_center+window/2.
                     subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
-                    aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+                    aaa=float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
                     halfwindow=window/2.
                     fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
                     realvirtual.append(False)
@@ -1159,7 +1159,7 @@ def on_key_find(event,args_list):
             for ieventxdata, enventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
                 if (ieventxdata%2)==1:
-                    new_center=np.float(enventxdata)
+                    new_center=float(enventxdata)
                     x_center=new_center
                     spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
                     subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
@@ -1169,12 +1169,12 @@ def on_key_find(event,args_list):
                     initial.append(False)
                     # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
                 else:
-                    new_center=np.float(enventxdata)
+                    new_center=float(enventxdata)
                     x_center=new_center
                     val1=x_center-window/2.
                     val2=x_center+window/2.
                     subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
-                    aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+                    aaa=float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
                     halfwindow=window/2.
                     fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
                     realvirtual.append(False)
@@ -1216,7 +1216,7 @@ def on_key_find(event,args_list):
             for ieventxdata, enventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
                 if ieventxdata in allowed_apertures:
-                    new_center=np.float(enventxdata)
+                    new_center=float(enventxdata)
                     x_center=new_center
                     spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
                     subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
@@ -1226,12 +1226,12 @@ def on_key_find(event,args_list):
                     initial.append(False)
                     # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
                 else:
-                    new_center=np.float(enventxdata)
+                    new_center=float(enventxdata)
                     x_center=new_center
                     val1=x_center-window/2.
                     val2=x_center+window/2.
                     subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
-                    aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+                    aaa=float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
                     halfwindow=window/2.
                     fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
                     realvirtual.append(False)
@@ -1284,7 +1284,7 @@ def on_key_find(event,args_list):
             for ieventxdata, enventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
                 if ieventxdata in allowed_apertures:
-                    new_center=np.float(enventxdata)
+                    new_center=float(enventxdata)
                     x_center=new_center
                     spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
                     subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
@@ -1294,12 +1294,12 @@ def on_key_find(event,args_list):
                     initial.append(False)
                     # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
                 else:
-                    new_center=np.float(enventxdata)
+                    new_center=float(enventxdata)
                     x_center=new_center
                     val1=x_center-window/2.
                     val2=x_center+window/2.
                     subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
-                    aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+                    aaa=float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
                     halfwindow=window/2.
                     fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
                     realvirtual.append(False)
@@ -1329,7 +1329,7 @@ def on_key_find(event,args_list):
             for ieventxdata, enventxdata in enumerate(idx):
                 print("Fitting apertures... {:0.2f}%".format(ieventxdata/ntot*100), end='\r')
                 if 2==1: ## Never run into this part of the loop. We want to assume all apertures to be phantom.
-                    new_center=np.float(enventxdata)
+                    new_center=float(enventxdata)
                     x_center=new_center
                     spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
                     subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
@@ -1339,12 +1339,12 @@ def on_key_find(event,args_list):
                     initial.append(False)
                     # subregion,fit,realvirtual,initial=m2fs.aperture_order(subregion,fit,realvirtual,initial)
                 else:
-                    new_center=np.float(enventxdata)
+                    new_center=float(enventxdata)
                     x_center=new_center
                     val1=x_center-window/2.
                     val2=x_center+window/2.
                     subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
-                    aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+                    aaa=float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
                     halfwindow=window/2.
                     fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
                     realvirtual.append(False)
@@ -1355,12 +1355,12 @@ def on_key_find(event,args_list):
 
 
         if event.key=='a':
-            new_center=np.float(event.xdata)
+            new_center=float(event.xdata)
             x_center=new_center
             val1=x_center-window/2.
             val2=x_center+window/2.
             subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
-            aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+            aaa=float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
             halfwindow=window/2.
             fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
             realvirtual.append(False)
@@ -1678,7 +1678,7 @@ def on_key_id_lines(event,args_list):
                 print('no information entered')
             else:
                 id_lines_pix.append(line_centers[best])
-                id_lines_wav.append(np.float(command))
+                id_lines_wav.append(float(command))
                 id_lines_used.append(best)
 
         if event.key=='d':#delete nearest boundary point
@@ -1710,7 +1710,7 @@ def on_key_id_lines(event,args_list):
             if command=='':
                 print('keeping original value')
             else:
-                rejection_sigma.append(np.float(command))
+                rejection_sigma.append(float(command))
             func0,rms0,npoints0,y=m2fs.id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
             func.append(func0)
             rms.append(rms0)
@@ -1940,7 +1940,7 @@ def get_meansky(throughputcorr_array,wavcal_array,plugmap):
                     if wav_max[skies[j]]<=wav0[i]:
                         vec_mask[j]=True
                 med=np.median(vec[vec_mask==False])
-                mad=np.median(np.abs(vec[vec_mask==False]-med))*1.4826*np.sqrt(np.pi/2.)/np.sqrt(np.float(len(np.where(vec_mask==False)[0])))
+                mad=np.median(np.abs(vec[vec_mask==False]-med))*1.4826*np.sqrt(np.pi/2.)/np.sqrt(float(len(np.where(vec_mask==False)[0])))
 
                 sky0_flux.append(med)
                 sky0_err.append(mad)
@@ -2863,8 +2863,8 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
             x0=np.array([id_lines_template.fit_lines.fit[q].mean.value for q in range(0,len(id_lines_template.fit_lines.fit))])
 
             xscale=(x0-pixel0_template)/pixelscale_template
-            x1=np.float(shiftstretch.x[1])*pixelscale_template+x0*(1.+np.polynomial.polynomial.polyval(xscale,shiftstretch.x[2:]))
-#        x1=np.float(shiftstretch.x[1])*pixelscale_template+x0*(1.+np.polynomial.chebyshev.chebval(xscale,shiftstretch.x[2:]))
+            x1=float(shiftstretch.x[1])*pixelscale_template+x0*(1.+np.polynomial.polynomial.polyval(xscale,shiftstretch.x[2:]))
+#        x1=float(shiftstretch.x[1])*pixelscale_template+x0*(1.+np.polynomial.chebyshev.chebval(xscale,shiftstretch.x[2:]))
             for i in range(0,len(x0)):
                 if id_lines_template.wav.mask[i]==False:
                     dist=np.sqrt((x1[i]-np.array([fit_lines.fit[q].mean.value for q in range(0,len(fit_lines.fit))]))**2)
@@ -3202,9 +3202,9 @@ def get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap,m2fsrun,field
             if len(this)>0:
                 thar_npoints.append(thar[j][this[0]].npoints)
                 thar_rms.append(thar[j][this[0]].rms)
-                thar_resolution0=np.float(-999.)
-                thar_wav_min0=np.float(-999.)
-                thar_wav_max0=np.float(-999.)
+                thar_resolution0=float(-999.)
+                thar_wav_min0=float(-999.)
+                thar_wav_max0=float(-999.)
                 if len(thar[j][this[0]].wav)>1:
                     keep=np.where(thar[j][this[0]].wav.mask==False)[0]
                     if len(keep)>1:
@@ -3243,7 +3243,7 @@ def get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap,m2fsrun,field
         this=np.where([skysubtract_array[q].aperture for q in range(0,len(skysubtract_array))]==plugmap['aperture'][i])[0][0]
         snratio_array.append(np.median(skysubtract_array[this].spec1d_flux.value[skysubtract_array[this].spec1d_mask==False]/skysubtract_array[this].spec1d_uncertainty.quantity.value[skysubtract_array[this].spec1d_mask==False]))
         this=np.where([aperture_array[q].trace_aperture for q in range(0,len(aperture_array))]==plugmap['aperture'][i])[0][0]
-        row=aperture_array[this].trace_func(np.float(len(data.data[0])/2.))
+        row=aperture_array[this].trace_func(float(len(data.data[0])/2.))
         row_array.append(row)
     snratio_array=np.array(snratio_array)
     m2fsrun_array=np.full(len(snratio_array),m2fsrun,dtype='a100')
@@ -3312,7 +3312,7 @@ def get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap,m2fsrun,field
 #                    if thar_npoints_array[i][best[best2]]>0:###why are there unmasked cases where thar_npoints=0 and/or wavcal.wav=[]
 #                        if len(wavcal_array[this[0]].wav)>0:
                     else:
-                        extra=(thar_wav_max_array[i][best[best2]]-thar_wav_min_array[i][best[best2]])/np.float(thar_npoints_array[i][best[best2]])
+                        extra=(thar_wav_max_array[i][best[best2]]-thar_wav_min_array[i][best[best2]])/float(thar_npoints_array[i][best[best2]])
                         lambdamin=thar_wav_min_array[i][best[best2]]-extra
                         lambdamax=thar_wav_max_array[i][best[best2]]+extra
     #                            print(wavcal_array[this[0]].wav)
@@ -3426,8 +3426,8 @@ def get_aperture_fast(j,columnspec_array,apertures_profile_middle,middle_column,
         pix_min=[np.min(trace_x[y.mask==False])]
         pix_max=[np.max(trace_x[y.mask==False])]
     else:
-        pix_min=[np.float(-999.)]
-        pix_max=[np.float(-999.)]
+        pix_min=[float(-999.)]
+        pix_max=[float(-999.)]
 
 
     print(j,trace_npoints,pix_min,pix_max)
@@ -3451,8 +3451,8 @@ def get_aperture_fast(j,columnspec_array,apertures_profile_middle,middle_column,
         pix_min.append(np.min(trace_x[y.mask==False]))
         pix_max.append(np.max(trace_x[y.mask==False]))
     else:
-        pix_min.append(np.float(-999.))
-        pix_max.append(np.float(-999.))
+        pix_min.append(float(-999.))
+        pix_max.append(float(-999.))
     profile_init=models.Polynomial1D(degree=profile_order)
     profile_fitter=fitting.LinearLSQFitter()
 
@@ -3478,8 +3478,8 @@ def get_aperture_fast(j,columnspec_array,apertures_profile_middle,middle_column,
                 y1.append(g_fit0.stddev.value)
                 y2.append(g_fit0.amplitude.value)
             else:#otherwise give a place-holder value and mask it below
-                y1.append(np.float(-999.))
-                y2.append(np.float(-999.))
+                y1.append(float(-999.))
+                y2.append(float(-999.))
         y1=np.array(y1)
         y2=np.array(y2)
         sigma_y=np.ma.masked_array(y1,mask=False)
@@ -4403,6 +4403,33 @@ def weightedmeanspec(stack00):
 
     return spec,spec_err,spec_mask
     
+def spec_median(stack00):
+    import numpy as np
+
+    data = []
+    mask = []
+    err = []
+    for i in range(len(stack00)):
+        data.append(stack00[i].data)
+        mask.append(stack00[i].mask)
+        err.append(np.sqrt(1./1./np.array(stack00[i].uncertainty.quantity.value)**2)) ## This is false
+    
+    data = np.array(data)
+    mask = np.array(mask)
+    err = np.array(err)
+    
+    data[mask] = np.nan
+    plt.plot(data[0][~mask[0]])
+
+    data = np.array(data)
+
+    medspec = np.nanmedian(data, axis=0)
+    spec_mask = np.isnan(medspec)
+    spec_err = np.nanmean(err, axis=0)
+    spec = medspec
+
+    return spec,spec_err,spec_mask
+
 def get_stack(stack0,j):
     from astropy.nddata import CCDData
     from specutils.spectra import Spectrum1D
@@ -4415,5 +4442,5 @@ def get_stack(stack0,j):
 #        print(len(stack0),len(stack0[0]),len(stack0[q]),q,j)
         stack00.append(CCDData(stack0[q][j].spec1d_flux,uncertainty=stack0[q][j].spec1d_uncertainty,mask=stack0[q][j].spec1d_mask))
 #        print(np.where(stack0[q][j].spec1d_mask==False)[0])
-    spec,spec_err,spec_mask=weightedmeanspec(stack00)
+    spec,spec_err,spec_mask=spec_median(stack00)
     return m2fs.extract1d(aperture=stack0[q][j].aperture,spec1d_pixel=stack0[q][j].spec1d_pixel*u.AA,spec1d_flux=spec*u.electron,spec1d_uncertainty=StdDevUncertainty(spec_err),spec1d_mask=spec_mask)
