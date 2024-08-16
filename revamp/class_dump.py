@@ -2005,10 +2005,13 @@ class ReduceM2FS:
             print('stacking ',data_file,' dome temperature=',temperature[len(temperature)-1],' deg C')
             temperature=np.array(temperature)
 
-            stack_wavcal_array=[]
-            for j in range(0,len(skysubtract_array)):
-                # print('stackwavcal working on aperture',j+1,' of ',len(skysubtract_array))
-                stack_wavcal_array.append(m2fs.get_wav(j,thar,skysubtract_array,thar_mjd,mjd_weightedmean,id_lines_minlines))
+            # stack_wavcal_array=[]
+            # for j in range(0,len(skysubtract_array)):
+            #     # print('stackwavcal working on aperture',j+1,' of ',len(skysubtract_array))
+            #     stack_wavcal_array.append(m2fs.get_wav(j,thar,skysubtract_array,thar_mjd,mjd_weightedmean,id_lines_minlines))
+
+            ## wavcal_array Should be the same as stack_wavcal_array
+            stack_wavcal_array = wavcal_array
             pickle.dump(stack_wavcal_array, open(stack_wavcal_array_file,'wb'))
 
             stack_array=[]
