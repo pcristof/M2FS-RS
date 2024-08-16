@@ -188,6 +188,7 @@ def on_key_id_lines(event,args_list):
                 id_lines_pix.append(line_centers[best])
                 id_lines_wav.append(np.float(command))
                 id_lines_used.append(best)
+            event.key='g'
 
         if event.key=='d':#delete nearest boundary point
             print('delete point nearest (',event.xdata,event.ydata,')')
@@ -294,14 +295,6 @@ def on_key_id_lines(event,args_list):
             for q in range(1,len(func)):
                 del(func[len(func)-1])
 
-        if event.key=='g':
-            print('g pressed')
-            func0,rms0,npoints0,maskarr=m2fs.id_lines_fit(deepcopy(id_lines_pix),deepcopy(id_lines_wav),deepcopy(id_lines_used),order,rejection_iterations,rejection_sigma)
-            mask = ~maskarr.mask
-            func.append(func0)
-            rms.append(rms0)
-            npoints.append(npoints0)
-
         # if event.key=='p':
         #     # from IPython import embed
         #     # embed()
@@ -329,6 +322,25 @@ def on_key_id_lines(event,args_list):
         if event.key=='q':
             plt.close(event.canvas.figure)
             # return
+
+        ## Delete anypoint that would be outside of the xlims
+        xlim=[np.min(extract1d.spec1d_pixel[extract1d.spec1d_mask==False]),np.max(extract1d.spec1d_pixel[extract1d.spec1d_mask==False])]
+
+        for ii in range(len(id_lines_pix)-1, -1, -1):
+            if (id_lines_pix[ii]<xlim[0]) | (id_lines_pix[ii]>xlim[1]):
+                del id_lines_pix[ii]
+                del id_lines_wav[ii]
+                del id_lines_used[ii]
+
+        event.key='g' ## Force plotting always to get mask
+        if event.key=='g':
+
+            func0,rms0,npoints0,maskarr=m2fs.id_lines_fit(deepcopy(id_lines_pix),deepcopy(id_lines_wav),deepcopy(id_lines_used),order,rejection_iterations,rejection_sigma)
+            mask = ~maskarr.mask
+            func.append(func0)
+            rms.append(rms0)
+            npoints.append(npoints0)
+
         else:
             pass
     
@@ -361,7 +373,7 @@ def plot_id_lines(extract1d,continuum,fit_lines,line_centers,id_lines_pix,id_lin
         ax1.axvline(x=fit_lines.fit[j].mean.value,linestyle=':',color='k',lw=0.3)
     for j in range(0,len(id_lines_pix)):
          _color='g'
-         if len(mask)>0:
+         if len(mask)>j:
             if mask[j]==False:
                 _color='r'             
          ax1.axvline(x=id_lines_pix[j],color=_color,lw=1,linestyle='-')
@@ -377,7 +389,8 @@ def plot_id_lines(extract1d,continuum,fit_lines,line_centers,id_lines_pix,id_lin
 #    ax2.scatter(id_lines_pix,id_lines_wav,color='k',s=3)
     # ax2.scatter(id_lines_pix,id_lines_wav-func(id_lines_pix),color='k',s=3)
     # ax2.scatter(np.array(id_lines_pix)[~mask],np.array(id_lines_wav-func(id_lines_pix))[~mask],color='k',s=10, marker='d')
-    ax2.scatter(np.array(id_lines_pix)[mask],np.array(id_lines_wav-func(id_lines_pix))[mask],color='k',s=10)
+    if len(mask)==len(np.array(id_lines_pix)):
+        ax2.scatter(np.array(id_lines_pix)[mask],np.array(id_lines_wav-func(id_lines_pix))[mask],color='k',s=10)
 
     x=extract1d.spec1d_pixel[extract1d.spec1d_mask==False]
 #    ax2.plot(x,func(x),color='r')
