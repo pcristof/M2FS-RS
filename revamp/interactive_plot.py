@@ -48,8 +48,7 @@ def get_id_lines_template(extract1d,linelist,continuum_rejection_low,continuum_r
         order=[id_lines_template0.func.degree]
         rms=[id_lines_template0.rms]
         npoints=[id_lines_template0.npoints]
-    from IPython import embed
-    embed()
+
     fig=plt.figure(1)
     mask = np.zeros(len(id_lines_pix), dtype=bool)
     ax1,ax2=plot_id_lines(extract1d,continuum0,fit_lines,line_centers,id_lines_pix,id_lines_wav,id_lines_used,func[len(func)-1],mask,fig)
