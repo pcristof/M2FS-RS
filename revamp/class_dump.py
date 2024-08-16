@@ -11,7 +11,7 @@ import numpy as np
 from astropy import time, coordinates as coord, units as u
 from astropy.nddata import StdDevUncertainty
 from astropy.io import fits
-from irap_tools import normalizationTools as norm_tools
+from . import normalizationTools as norm_tools
 
 import matplotlib
 import matplotlib.pyplot as plt

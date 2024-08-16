@@ -1961,7 +1961,7 @@ def get_meansky(throughputcorr_array,wavcal_array,plugmap):
         meansky=Spectrum1D(spectral_axis=wav0*u.AA,flux=sky0_flux*u.electron,uncertainty=StdDevUncertainty(sky0_err),mask=sky0_mask)
     return meansky
 
-from irap_tools import normalizationTools as norm_tools
+from . import normalizationTools as norm_tools
 
 
 def fit_continuum(wvl, flux, wvl_ref = None, window_size=200, p=95, degree=3, 
