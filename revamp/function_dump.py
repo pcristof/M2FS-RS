@@ -3616,8 +3616,42 @@ def gen_plugmap_from_file(filename, ccd):
     headers = []
     objtype = []
 
+    #### Identify the file type.
+    ## 
+    rawfile = False
     f = open(filename, 'r')
     for line in f.readlines():
+        if '[assignments]' in line:
+            rawfile = True
+    f.close()
+
+    lines = [] ## Store the lines
+    #
+    if rawfile:
+        record = False
+        f = open(filename, 'r')
+        for line in f.readlines():
+            if '[assignments]' in line: ## Data block
+                # print('recording')
+                record = True
+                continue
+            elif '[guides]' in line:
+                # print('breaking')
+                record=False
+                break
+            if record:
+                if 'fiber' in line: 
+                    pass
+                else:
+                    lines.append(line)
+        f.close()   
+    else:
+        f = open(filename, 'r')
+        for line in f.readlines():
+            lines.append(line)
+        f.close()
+
+    for line in lines:
         fiber = line.split()[0].lower()
         stat = line.split()[1]
         if ccd not in fiber: continue
@@ -3629,7 +3663,6 @@ def gen_plugmap_from_file(filename, ccd):
             objtype.append('SKY')
         else:
             objtype.append('TARGET')
-    f.close()
 
     plugmapdic = {1:{}, 2:{}, 3:{}, 4:{}, 5:{}, 6:{}, 7:{}, 8:{}} ## Initialize cassettes dics
     for i in range(len(headers)):
