@@ -798,7 +798,7 @@ def on_key_id_lines(event,args_list):
         if command=='':
             print('keeping original value')
         else:
-            order.append(np.long(command))
+            order.append(int(command))
         func0,rms0,npoints0,y=m2fs.id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
         func.append(func0)
         rms.append(rms0)
@@ -822,7 +822,7 @@ def on_key_id_lines(event,args_list):
         if command=='':
             print('keeping original value')
         else:
-            rejection_iterations.append(np.long(command))
+            rejection_iterations.append(int(command))
         func0,rms0,npoints0,y=m2fs.id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
         func.append(func0)
         rms.append(rms0)
@@ -1698,7 +1698,7 @@ def on_key_id_lines(event,args_list):
             if command=='':
                 print('keeping original value')
             else:
-                order.append(np.long(command))
+                order.append(int(command))
             func0,rms0,npoints0,y=m2fs.id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
             func.append(func0)
             rms.append(rms0)
@@ -1722,7 +1722,7 @@ def on_key_id_lines(event,args_list):
             if command=='':
                 print('keeping original value')
             else:
-                rejection_iterations.append(np.long(command))
+                rejection_iterations.append(int(command))
             func0,rms0,npoints0,y=m2fs.id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
             func.append(func0)
             rms.append(rms0)
@@ -1881,7 +1881,7 @@ def get_meansky(throughputcorr_array,wavcal_array,plugmap):
     ## Store that in arrays
     if len(throughputcorr_array)>0:
         if len(wav_min[use==1])>0:
-            wav0=np.linspace(np.min(wav_min[use==1]),np.max(wav_max[use==1]),np.long(np.median(npix[use==1])*10))
+            wav0=np.linspace(np.min(wav_min[use==1]),np.max(wav_max[use==1]),int(np.median(npix[use==1])*10))
 #            id_nlines=np.array([len(np.where(id_lines_array[q].wav>0.)[0]) for q in range(0,len(id_lines_array))],dtype='int')
             skies=np.where(((plugmap['objtype']=='SKY')|(plugmap['objtype']=='unused'))&(np.array([len(wavcal_array[q].wav) for q in range(0,len(wavcal_array))])>0))[0]
             targets=np.where((plugmap['objtype']=='TARGET')&(np.array([len(wavcal_array[q].wav) for q in range(0,len(wavcal_array))])>0))[0]
@@ -2337,7 +2337,7 @@ def get_throughput_continuum(twilightstack_array,twilightstack_wavcal_array,cont
     npix=np.array(npix)
     continuum_array=np.array(continuum_array)
     if((len(twilightstack_array)>0)&(len(np.where(use==1)[0])>0)):
-        wav0=np.linspace(np.min(wav_min[use==1]),np.max(wav_max[use==1]),np.long(np.median(npix[use==1])))
+        wav0=np.linspace(np.min(wav_min[use==1]),np.max(wav_max[use==1]),int(np.median(npix[use==1])))
         flux0=[]#np.zeros(len(wav0))
         mask0=[]
         for j in range(0,len(wav0)):
@@ -2383,6 +2383,11 @@ def get_continuum(spec1d,continuum_rejection_low,continuum_rejection_high,contin
     fitter=fitting.LinearLSQFitter()
 #    lamb=(np.arange(len(spec1d.data),dtype='float'))*u.AA#unit is pixels, but specutils apparently can't handle that, so we lie and say Angs.
     lamb=spec1d.spectral_axis#(np.arange(len(spec1d.spectral_axis),dtype='float'))*u.AA#unit is pixels, but specutils apparently can't handle that, so we lie and say Angs.
+    
+    ## PIC: for some reason it happens that values are NaN but were not masked.
+    idx = np.where(np.isnan(spec1d.flux))
+    spec1d.mask[idx] = True
+    
     y=np.ma.masked_array(spec1d.flux,mask=spec1d.mask.astype(bool))
 
     ## For each iteration in the continuum_rejection_iterations (???)
@@ -2397,10 +2402,6 @@ def get_continuum(spec1d,continuum_rejection_low,continuum_rejection_high,contin
             continuum=fitter(continuum_init,lamb.value[y.mask==False],y[y.mask==False])
         else:
             continuum=continuum_init
-
-
-
-
 
 #        continuum=fitter(continuum_init,lamb.value,y)
         ## Compute the RMS between the continuum and the twilight
@@ -3070,7 +3071,7 @@ def get_columnspec(data,trace_step,n_lines,continuum_rejection_low,continuum_rej
     from specutils.fitting import find_lines_derivative
 
     n_cols=np.shape(data)[1]
-    trace_n=np.long(n_cols/trace_step)
+    trace_n=int(n_cols/trace_step)
 #    print(n_cols,trace_n)
     trace_cols=np.linspace(0,n_cols,trace_n,dtype='int')
 
@@ -3087,12 +3088,16 @@ def get_columnspec(data,trace_step,n_lines,continuum_rejection_low,continuum_rej
         col0=np.arange(n_lines)+trace_cols[i]
         spec1d0=m2fs.column_stack(data,col0)
 #        np.pause()
-        continuum0,rms0=get_continuum(spec1d0,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order)
+        continuum0,rms0=get_continuum(spec1d0,continuum_rejection_low,continuum_rejection_high,continuum_rejection_iterations,continuum_rejection_order, debug=False)
         pixel0=(np.arange(len(spec1d0.data),dtype='float'))*u.AA#unit is pixels, but specutils apparently can't handle that, so we lie and say Angs.
         spec_contsub=spec1d0-continuum0(pixel0.value)
         spec_contsub.uncertainty.quantity.value[:]=rms0
 #        spec_contsub.mask[:]=False
+        # try:
         apertures_initial0=find_lines_derivative(spec_contsub,flux_threshold=threshold_factor*rms0)#find peaks in continuum-subtracted "spectrum"
+        # except:
+        #     from IPython import embed
+        #     embed()
         # xvals = my_find_lines_derivative(spec_contsub.data,flux_threshold=threshold_factor*rms0)
         # from astropy.table.table import QTable
         # qtable = QTable()
@@ -3950,8 +3955,8 @@ def get_extract1d(j,data,apertures_profile_middle,aperture_array,aperture_peak,p
 #         profile_sigma=aperture_array[j].profile_sigma(x)
 #         wing=np.min([extract1d_aperture_width,3.*profile_sigma,(above0-below0)/2./2.])
 # #        wing=3.
-#         y1=np.long(ymid-wing)
-#         y2=np.long(ymid+wing)
+#         y1=int(ymid-wing)
+#         y2=int(ymid+wing)
 #         sss=data[y1:y2+1,x]
 #         if ((wing>0.)&(len(np.where(sss.mask==False)[0])>=1)):
 # #            sum1=CCDData([0.],unit=data.unit,mask=[False])
@@ -4028,8 +4033,8 @@ def extract_aperture(pix, _data, _mask, _uncertainty, ymids, profile_sigmas, win
         profile_sigma = profile_sigmas[x]
         wing = wings[x]
         ymid = ymids[x]
-        y1=np.long(ymid-wing)
-        y2=np.long(ymid+wing)
+        y1=int(ymid-wing)
+        y2=int(ymid+wing)
         data=_data[y1:y2+1,x]
         mask=_mask[y1:y2+1,x]
         uncertainty = _uncertainty[y1:y2+1,x]
@@ -4106,8 +4111,8 @@ def extract_aperture2(pix, _data, _mask, _uncertainty, ymids, profile_sigmas, wi
         profile_sigma = profile_sigmas[x]
         wing = wings[x]
         ymid = ymids[x]
-        y1=np.long(ymid-wing)
-        y2=np.long(ymid+wing)
+        y1=int(ymid-wing)
+        y2=int(ymid+wing)
         data=_data[y1:y2+1,x]
         mask=_mask[y1:y2+1,x]
         uncertainty = _uncertainty[y1:y2+1,x]
@@ -4235,8 +4240,8 @@ def get_apmask2(data,aperture_array,apertures_profile_middle,aperture_peak,image
                     profile_sigma = 2 ## Default value
                 wing=np.min([3.*profile_sigma,(above0-below0)/2./2.])
                 if wing>0.:
-                    y1=np.long(ymid-wing)
-                    y2=np.long(ymid+wing)
+                    y1=int(ymid-wing)
+                    y2=int(ymid+wing)
                     apmask[y1:y2,x]=True
                     if ((x<aperture_array[j].trace_pixel_min)|(x>aperture_array[j].trace_pixel_max)):
                         apmask[y1:y2,x]=True
@@ -4262,8 +4267,8 @@ def trace_apmask_aperture_fast(apmask, apmask2, pix, trace_vals, realaperture, p
         else: wing = 3.*profile_sigma
 
         if wing>0.:
-            y1=np.long(ymid-wing)
-            y2=np.long(ymid+wing)
+            y1=int(ymid-wing)
+            y2=int(ymid+wing)
             if realaperture:
                 apmask[y1:y2,x]=True
                 if ((x<aperture_array_trace_pixel_min)|(x>aperture_array_trace_pixel_max)):
@@ -4323,8 +4328,8 @@ def get_apmask(data,aperture_array,apertures_profile_middle,aperture_peak,image_
         #     #     print(3.*profile_sigma,(above0-below0)/3.)
         #     wing=np.min([3.*profile_sigma,(above0-below0)/3.])
         #     if wing>0.:
-        #         y1=np.long(ymid-wing)
-        #         y2=np.long(ymid+wing)
+        #         y1=int(ymid-wing)
+        #         y2=int(ymid+wing)
         #         if apertures_profile_middle.realvirtual[j]:
         #             apmask[y1:y2,x]=True
         #             if ((x<aperture_array[j].trace_pixel_min)|(x>aperture_array[j].trace_pixel_max)):
@@ -4369,8 +4374,8 @@ def get_apflat(data,aperture_array,apertures_profile_middle,aperture_peak,image_
                 profile_amplitude=aperture_array[j].profile_amplitude(x)
                 wing=np.min([3.*profile_sigma,(above0-below0)/2./2.])
                 if wing>0.:
-                    y1=np.long(ymid-wing)
-                    y2=np.long(ymid+wing)
+                    y1=int(ymid-wing)
+                    y2=int(ymid+wing)
                     if ((x<aperture_array[j].trace_pixel_min)|(x>aperture_array[j].trace_pixel_max)):
                         apflat_mask[y1:y2,x]=True
                     if ((ymid<0.)|(ymid>len(data.data))):
