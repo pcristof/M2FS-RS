@@ -440,7 +440,7 @@ def on_key_trace(event,args_list):
     if event.key=='o':
         print('order of polynomial fit is ',order[len(order)-1])
         command=input('enter new order (must be integer): ')
-        order.append(np.long(command))
+        order.append(int(command))
     if event.key=='r':
         print('rejection sigma is ',rejection_sigma[len(rejection_sigma)-1])
         command=input('enter new rejection sigma (float): ')
@@ -543,7 +543,7 @@ def on_key_id_lines(event,args_list):
         if command=='':
             print('keeping original value')
         else:
-            order.append(np.long(command))
+            order.append(int(command))
         func0,rms0,npoints0,y=id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
         func.append(func0)
         rms.append(rms0)
@@ -567,7 +567,7 @@ def on_key_id_lines(event,args_list):
         if command=='':
             print('keeping original value')
         else:
-            rejection_iterations.append(np.long(command))
+            rejection_iterations.append(int(command))
         func0,rms0,npoints0,y=id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
         func.append(func0)
         rms.append(rms0)
@@ -1151,7 +1151,7 @@ def get_columnspec(data,trace_step,n_lines,continuum_rejection_low,continuum_rej
     from specutils.fitting import find_lines_derivative
 
     n_cols=np.shape(data)[1]
-    trace_n=np.long(n_cols/trace_step)
+    trace_n=int(n_cols/trace_step)
 #    print(n_cols,trace_n)
     trace_cols=np.linspace(0,n_cols,trace_n,dtype='int')
 
@@ -1635,8 +1635,8 @@ def get_extract1d(j,data,apertures_profile_middle,aperture_array,aperture_peak,p
         profile_sigma=aperture_array[j].profile_sigma(x)
         wing=np.min([extract1d_aperture_width,3.*profile_sigma,(above0-below0)/2./2.])
 #        wing=3.
-        y1=np.long(ymid-wing)
-        y2=np.long(ymid+wing)
+        y1=int(ymid-wing)
+        y2=int(ymid+wing)
         sss=data[y1:y2+1,x]
         if ((wing>0.)&(len(np.where(sss.mask==False)[0])>=1)):
 #            sum1=CCDData([0.],unit=data.unit,mask=[False])
@@ -1702,8 +1702,8 @@ def get_apflat(data,aperture_array,apertures_profile_middle,aperture_peak,image_
                 profile_amplitude=aperture_array[j].profile_amplitude(x)
                 wing=np.min([3.*profile_sigma,(above0-below0)/2./2.])
                 if wing>0.:
-                    y1=np.long(ymid-wing)
-                    y2=np.long(ymid+wing)
+                    y1=int(ymid-wing)
+                    y2=int(ymid+wing)
                     if ((x<aperture_array[j].trace_pixel_min)|(x>aperture_array[j].trace_pixel_max)):
                         apflat_mask[y1:y2,x]=True
                     if ((ymid<0.)|(ymid>len(data.data))):
@@ -1743,8 +1743,8 @@ def mask_boundary(mask0,image_boundary):
 
     mask=mask0
     for i in range(0,len(mask)):
-        mask_low=np.long(np.interp(x=np.float(i),xp=[image_boundary.lower[q][1] for q in range(0,len(image_boundary.lower))],fp=[image_boundary.lower[q][0] for q in range(0,len(image_boundary.lower))]))
-        mask_high=np.long(np.interp(x=np.float(i),xp=[image_boundary.upper[q][1] for q in range(0,len(image_boundary.upper))],fp=[image_boundary.upper[q][0] for q in range(0,len(image_boundary.upper))]))
+        mask_low=int(np.interp(x=np.float(i),xp=[image_boundary.lower[q][1] for q in range(0,len(image_boundary.lower))],fp=[image_boundary.lower[q][0] for q in range(0,len(image_boundary.lower))]))
+        mask_high=int(np.interp(x=np.float(i),xp=[image_boundary.upper[q][1] for q in range(0,len(image_boundary.upper))],fp=[image_boundary.upper[q][0] for q in range(0,len(image_boundary.upper))]))
         mask[i][0:mask_low]=True
         mask[i][mask_high:len(mask[i])]=True
     return mask
@@ -1787,8 +1787,8 @@ def get_apmask(data,aperture_array,apertures_profile_middle,aperture_peak,image_
                 profile_sigma=aperture_array[j].profile_sigma(x)
                 wing=np.min([3.*profile_sigma,(above0-below0)/2./2.])
                 if wing>0.:
-                    y1=np.long(ymid-wing)
-                    y2=np.long(ymid+wing)
+                    y1=int(ymid-wing)
+                    y2=int(ymid+wing)
                     apmask[y1:y2,x]=True
                     if ((x<aperture_array[j].trace_pixel_min)|(x>aperture_array[j].trace_pixel_max)):
                         apmask[y1:y2,x]=True
@@ -1988,7 +1988,7 @@ def get_throughput_continuum(twilightstack_array,twilightstack_wavcal_array,cont
     npix=np.array(npix)
     continuum_array=np.array(continuum_array)
     if((len(twilightstack_array)>0)&(len(np.where(use==1)[0])>0)):
-        wav0=np.linspace(np.min(wav_min[use==1]),np.max(wav_max[use==1]),np.long(np.median(npix[use==1])))
+        wav0=np.linspace(np.min(wav_min[use==1]),np.max(wav_max[use==1]),int(np.median(npix[use==1])))
         flux0=[]#np.zeros(len(wav0))
         mask0=[]
         for j in range(0,len(wav0)):
@@ -2173,7 +2173,7 @@ def get_plugmap(header,throughputcorr_array,fibermap,ccd,fiber_changes):#for old
         if ((fibermap_item[5]=='T')|(fibermap_item[5]=='O')):
 #        if ':' in coords_string:
             c=SkyCoord(coords_string,unit=(u.hourangle,u.deg))
-            aperture.append(np.long(throughputcorr_array[i].aperture))
+            aperture.append(int(throughputcorr_array[i].aperture))
             radeg.append(c.ra.degree)
             decdeg.append(c.dec.degree)
             expid.append(obj)
@@ -2202,7 +2202,7 @@ def get_plugmap(header,throughputcorr_array,fibermap,ccd,fiber_changes):#for old
         elif fibermap_item[5]=='S':
 #        if (('sky' in coords_string)|('Sky' in coords_string)):
             c=SkyCoord(coords_string,unit=(u.hourangle,u.deg))
-            aperture.append(np.long(throughputcorr_array[i].aperture))
+            aperture.append(int(throughputcorr_array[i].aperture))
             radeg.append(c.ra.degree)
             decdeg.append(c.dec.degree)
             expid.append(obj)
@@ -2229,7 +2229,7 @@ def get_plugmap(header,throughputcorr_array,fibermap,ccd,fiber_changes):#for old
             channelcassfib.append(channel_cass_fib)
         else:
 #            c=SkyCoord(coords_string,unit=(u.hourangle,u.deg))
-            aperture.append(np.long(throughputcorr_array[i].aperture))
+            aperture.append(int(throughputcorr_array[i].aperture))
             radeg.append(-999)
             decdeg.append(-999)
             expid.append(obj)
@@ -2314,7 +2314,7 @@ def get_meansky(throughputcorr_array,wavcal_array,plugmap):
     meansky=Spectrum1D(spectral_axis=np.array([0.])*u.AA,flux=np.array([0.])*u.electron,uncertainty=StdDevUncertainty(np.array([np.inf])),mask=np.array([True]))
     if len(throughputcorr_array)>0:
         if len(wav_min[use==1])>0:
-            wav0=np.linspace(np.min(wav_min[use==1]),np.max(wav_max[use==1]),np.long(np.median(npix[use==1])*10))
+            wav0=np.linspace(np.min(wav_min[use==1]),np.max(wav_max[use==1]),int(np.median(npix[use==1])*10))
 #            id_nlines=np.array([len(np.where(id_lines_array[q].wav>0.)[0]) for q in range(0,len(id_lines_array))],dtype='int')
             skies=np.where(((plugmap['objtype']=='SKY')|(plugmap['objtype']=='unused'))&(np.array([len(wavcal_array[q].wav) for q in range(0,len(wavcal_array))])>0))[0]
             targets=np.where((plugmap['objtype']=='TARGET')&(np.array([len(wavcal_array[q].wav) for q in range(0,len(wavcal_array))])>0))[0]

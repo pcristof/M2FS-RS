@@ -823,7 +823,7 @@ class ReduceM2FS:
             print('loading existing '+apertures_profile_middle_file+', will overwrite')
             apertures_profile_middle,middle_column=pickle.load(open(apertures_profile_middle_file,'rb'))
         elif(not(apertures_profile_middle_exists)):
-            middle_column=np.long(len(columnspec_array)/2)
+            middle_column=int(len(columnspec_array)/2)
             apertures_profile_middle=columnspec_array[middle_column].apertures_profile
         else: 
             return 1
