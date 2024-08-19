@@ -97,7 +97,7 @@ def line_id_add_lines(linelist,line_centers,id_lines_used,func0,id_lines_tol_ang
             if dist[best]<id_lines_tol_angs:
                 print(line_centers[j])
                 new_pix.append(line_centers[j])
-                new_wav.append(np.float(linelist.wavelength[best]))
+                new_wav.append(float(linelist.wavelength[best]))
                 new_used.append(j)
     print('added ',len(new_used),' new lines from line list')
 
@@ -359,7 +359,7 @@ def on_key_find(event,args_list):
         subregion,fit,realvirtual,initial=aperture_order(subregion,fit,realvirtual,initial)
 
     if event.key=='n':
-        new_center=np.float(event.xdata)
+        new_center=float(event.xdata)
         x_center=new_center
         spec1d=Spectrum1D(spectral_axis=columnspec_array[column].pixel,flux=columnspec_array[column].spec*u.electron,uncertainty=columnspec_array[column].err,mask=columnspec_array[column].mask)
         subregion0,fit0=fit_aperture(spec1d-columnspec_array[column].continuum(columnspec_array[column].pixel.value),window,x_center)
@@ -370,12 +370,12 @@ def on_key_find(event,args_list):
         subregion,fit,realvirtual,initial=aperture_order(subregion,fit,realvirtual,initial)
 
     if event.key=='a':
-        new_center=np.float(event.xdata)
+        new_center=float(event.xdata)
         x_center=new_center
         val1=x_center-window/2.
         val2=x_center+window/2.
         subregion.append(SpectralRegion(val1*u.AA,val2*u.AA))#define extraction region from window
-        aaa=np.float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
+        aaa=float(np.max(columnspec_array[column].spec-columnspec_array[column].continuum(columnspec_array[column].pixel.value)))
         halfwindow=window/2.
         fit.append(models.Gaussian1D(amplitude=aaa*u.electron,mean=x_center*u.AA,stddev=halfwindow*u.AA))
         realvirtual.append(False)
@@ -444,7 +444,7 @@ def on_key_trace(event,args_list):
     if event.key=='r':
         print('rejection sigma is ',rejection_sigma[len(rejection_sigma)-1])
         command=input('enter new rejection sigma (float): ')
-        rejection_sigma.append(np.float(command))
+        rejection_sigma.append(float(command))
     if event.key=='z':
         for q in range(1,len(pix_min)):
             del(pix_min[len(pix_min)-1])
@@ -523,7 +523,7 @@ def on_key_id_lines(event,args_list):
             print('no information entered')
         else:
             id_lines_pix.append(line_centers[best])
-            id_lines_wav.append(np.float(command))
+            id_lines_wav.append(float(command))
             id_lines_used.append(best)
 
     if event.key=='d':#delete nearest boundary point
@@ -555,7 +555,7 @@ def on_key_id_lines(event,args_list):
         if command=='':
             print('keeping original value')
         else:
-            rejection_sigma.append(np.float(command))
+            rejection_sigma.append(float(command))
         func0,rms0,npoints0,y=id_lines_fit(id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma)
         func.append(func0)
         rms.append(rms0)
@@ -931,8 +931,8 @@ def get_aperture(j,columnspec_array,apertures_profile_middle,middle_column,trace
         pix_min=[np.min(trace_x[y.mask==False])]
         pix_max=[np.max(trace_x[y.mask==False])]
     else:
-        pix_min=[np.float(-999.)]
-        pix_max=[np.float(-999.)]
+        pix_min=[float(-999.)]
+        pix_max=[float(-999.)]
 
 
     print(j,trace_npoints,pix_min,pix_max)
@@ -956,8 +956,8 @@ def get_aperture(j,columnspec_array,apertures_profile_middle,middle_column,trace
         pix_min.append(np.min(trace_x[y.mask==False]))
         pix_max.append(np.max(trace_x[y.mask==False]))
     else:
-        pix_min.append(np.float(-999.))
-        pix_max.append(np.float(-999.))
+        pix_min.append(float(-999.))
+        pix_max.append(float(-999.))
     profile_init=models.Polynomial1D(degree=profile_order)
     profile_fitter=fitting.LinearLSQFitter()
 
@@ -973,8 +973,8 @@ def get_aperture(j,columnspec_array,apertures_profile_middle,middle_column,trace
                 y1.append(g_fit0.stddev.value)
                 y2.append(g_fit0.amplitude.value)
             else:#otherwise give a place-holder value and mask it below
-                y1.append(np.float(-999.))
-                y2.append(np.float(-999.))
+                y1.append(float(-999.))
+                y2.append(float(-999.))
         y1=np.array(y1)
         y2=np.array(y2)
         sigma_y=np.ma.masked_array(y1,mask=False)
@@ -1531,8 +1531,8 @@ def get_id_lines_translate(extract1d_template,id_lines_template,extract1d,lineli
             x0=np.array([id_lines_template.fit_lines.fit[q].mean.value for q in range(0,len(id_lines_template.fit_lines.fit))])
 
             xscale=(x0-pixel0_template)/pixelscale_template
-            x1=np.float(shiftstretch.x[1])*pixelscale_template+x0*(1.+np.polynomial.polynomial.polyval(xscale,shiftstretch.x[2:]))
-#        x1=np.float(shiftstretch.x[1])*pixelscale_template+x0*(1.+np.polynomial.chebyshev.chebval(xscale,shiftstretch.x[2:]))
+            x1=float(shiftstretch.x[1])*pixelscale_template+x0*(1.+np.polynomial.polynomial.polyval(xscale,shiftstretch.x[2:]))
+#        x1=float(shiftstretch.x[1])*pixelscale_template+x0*(1.+np.polynomial.chebyshev.chebval(xscale,shiftstretch.x[2:]))
             for i in range(0,len(x0)):
                 if id_lines_template.wav.mask[i]==False:
                     dist=np.sqrt((x1[i]-np.array([fit_lines.fit[q].mean.value for q in range(0,len(fit_lines.fit))]))**2)
@@ -1743,8 +1743,8 @@ def mask_boundary(mask0,image_boundary):
 
     mask=mask0
     for i in range(0,len(mask)):
-        mask_low=int(np.interp(x=np.float(i),xp=[image_boundary.lower[q][1] for q in range(0,len(image_boundary.lower))],fp=[image_boundary.lower[q][0] for q in range(0,len(image_boundary.lower))]))
-        mask_high=int(np.interp(x=np.float(i),xp=[image_boundary.upper[q][1] for q in range(0,len(image_boundary.upper))],fp=[image_boundary.upper[q][0] for q in range(0,len(image_boundary.upper))]))
+        mask_low=int(np.interp(x=float(i),xp=[image_boundary.lower[q][1] for q in range(0,len(image_boundary.lower))],fp=[image_boundary.lower[q][0] for q in range(0,len(image_boundary.lower))]))
+        mask_high=int(np.interp(x=float(i),xp=[image_boundary.upper[q][1] for q in range(0,len(image_boundary.upper))],fp=[image_boundary.upper[q][0] for q in range(0,len(image_boundary.upper))]))
         mask[i][0:mask_low]=True
         mask[i][mask_high:len(mask[i])]=True
     return mask
@@ -1761,7 +1761,7 @@ def get_above_below(j,data,aperture_array,apertures_profile_middle,aperture_peak
     if len(above)>0:
         above0=aperture_peak[np.min(above)]
     else:
-        above0=np.float(len(data.data))
+        above0=float(len(data.data))
     return above0,below0
 
 def get_apmask(data,aperture_array,apertures_profile_middle,aperture_peak,image_boundary):
@@ -2346,7 +2346,7 @@ def get_meansky(throughputcorr_array,wavcal_array,plugmap):
                     if wav_max[skies[j]]<=wav0[i]:
                         vec_mask[j]=True
                 med=np.median(vec[vec_mask==False])
-                mad=np.median(np.abs(vec[vec_mask==False]-med))*1.4826*np.sqrt(np.pi/2.)/np.sqrt(np.float(len(np.where(vec_mask==False)[0])))
+                mad=np.median(np.abs(vec[vec_mask==False]-med))*1.4826*np.sqrt(np.pi/2.)/np.sqrt(float(len(np.where(vec_mask==False)[0])))
 
                 sky0_flux.append(med)
                 sky0_err.append(mad)
@@ -2542,19 +2542,19 @@ def get_thar(datadir,utdate,ccd,tharfile,hires_exptime,medres_exptime,field_name
         if filtername=='Mgb_Rev2':
             filtername='Mgb_HiRes'
         if filtername=='Mgb_HiRes':
-            if ((np.float(data.header['exptime'])>=hires_exptime)|('twilight' in field_name)):
+            if ((float(data.header['exptime'])>=hires_exptime)|('twilight' in field_name)):
                 thar_mjd.append(np.mean(times.mjd))
                 thar.append(id_lines_array)
 #                lines.append([id_lines_array[q].wav[id_lines_array[q].wav.mask==False] for q in range(0,len(id_lines_array))])
                 temperature.append(data.header['T-DOME'])
-                thar_exptime.append(np.float(data.header['exptime']))
+                thar_exptime.append(float(data.header['exptime']))
         if filtername=='Mgb_MedRes':
-            if ((np.float(data.header['exptime'])>=medres_exptime)|('twilight' in field_name)):
+            if ((float(data.header['exptime'])>=medres_exptime)|('twilight' in field_name)):
                 thar_mjd.append(np.mean(times.mjd))
                 thar.append(id_lines_array)
 #                lines.append([id_lines_array[q].wav.data[id_lines_array[q].wav.mask==False] for q in range(0,len(id_lines_array))])
                 temperature.append(data.header['T-DOME'])
-                thar_exptime.append(np.float(data.header['exptime']))
+                thar_exptime.append(float(data.header['exptime']))
 
     temperature=np.array(temperature)
     thar_exptime=np.array(thar_exptime)
@@ -2619,9 +2619,9 @@ def get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap,m2fsrun,field
             if len(this)>0:
                 thar_npoints.append(thar[j][this[0]].npoints)
                 thar_rms.append(thar[j][this[0]].rms)
-                thar_resolution0=np.float(-999.)
-                thar_wav_min0=np.float(-999.)
-                thar_wav_max0=np.float(-999.)
+                thar_resolution0=float(-999.)
+                thar_wav_min0=float(-999.)
+                thar_wav_max0=float(-999.)
                 if len(thar[j][this[0]].wav)>1:
                     keep=np.where(thar[j][this[0]].wav.mask==False)[0]
                     if len(keep)>1:
@@ -2660,7 +2660,7 @@ def get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap,m2fsrun,field
         this=np.where([skysubtract_array[q].aperture for q in range(0,len(skysubtract_array))]==plugmap['aperture'][i])[0][0]
         snratio_array.append(np.median(skysubtract_array[this].spec1d_flux.value[skysubtract_array[this].spec1d_mask==False]/skysubtract_array[this].spec1d_uncertainty.quantity.value[skysubtract_array[this].spec1d_mask==False]))
         this=np.where([aperture_array[q].trace_aperture for q in range(0,len(aperture_array))]==plugmap['aperture'][i])[0][0]
-        row=aperture_array[this].trace_func(np.float(len(data.data[0])/2.))
+        row=aperture_array[this].trace_func(float(len(data.data[0])/2.))
         row_array.append(row)
     snratio_array=np.array(snratio_array)
     m2fsrun_array=np.full(len(snratio_array),m2fsrun,dtype='a100')
@@ -2721,7 +2721,7 @@ def get_hdul(data,skysubtract_array,sky_array,wavcal_array,plugmap,m2fsrun,field
                         np.pause()
 #                    if thar_npoints_array[i][best[best2]]>0:###why are there unmasked cases where thar_npoints=0 and/or wavcal.wav=[]
 #                        if len(wavcal_array[this[0]].wav)>0:
-                    extra=(thar_wav_max_array[i][best[best2]]-thar_wav_min_array[i][best[best2]])/np.float(thar_npoints_array[i][best[best2]])
+                    extra=(thar_wav_max_array[i][best[best2]]-thar_wav_min_array[i][best[best2]])/float(thar_npoints_array[i][best[best2]])
                     lambdamin=thar_wav_min_array[i][best[best2]]-extra
                     lambdamax=thar_wav_max_array[i][best[best2]]+extra
 #                            print(wavcal_array[this[0]].wav)
@@ -2881,7 +2881,7 @@ def m2fs_getfromfits(hdul):
         if obj[j]=='TARGET':
             coords=coord.SkyCoord(ra,dec,unit=(u.deg,u.deg),frame='icrs')
             lco=coord.EarthLocation.from_geodetic(lon=-70.6919444*u.degree,lat=-29.0158333*u.degree,height=2380.*u.meter)
-            times=time.Time(np.float(hdul[0].header['weighted_mjd']),format='mjd',location=lco)
+            times=time.Time(float(hdul[0].header['weighted_mjd']),format='mjd',location=lco)
             light_travel_time_helio=times.light_travel_time(coords,'heliocentric')
         bad=np.where(mask_or[j]==1)[0]
         var[j][bad]=1.e+30
