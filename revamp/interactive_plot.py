@@ -63,6 +63,7 @@ def get_id_lines_template(extract1d,linelist,continuum_rejection_low,continuum_r
     print('press \'i\' identify regions of the spectrum to remove \n')
     print('press \'q\' to quit \n')
     print('press \'.\' to print cursor position and position of nearest line \n')
+    print('\'f\' delete the most discrepent point\n')
     fig.canvas.mpl_disconnect(fig.canvas.manager.key_press_handler_id) # PIC This disables any key that was not set up.
     id_lines_tol_angs_arr = [id_lines_tol_angs]
     cid=fig.canvas.mpl_connect('key_press_event',lambda event: on_key_id_lines(event,[extract1d,continuum0,fit_lines,linelist,line_centers,id_lines_pix,id_lines_wav,id_lines_used,order,rejection_iterations,rejection_sigma,func,rms,npoints,id_lines_tol_angs_arr,mask,fig]))
